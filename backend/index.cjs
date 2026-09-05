@@ -149,7 +149,7 @@ function scanLocalMusic() {
 function inspectLocalDirectory(inputPath) {
   const raw = String(inputPath || '').trim();
   if (!raw) return { ok: false, exists: false, readable: false, isDirectory: false, error: '目录地址为空' };
-  if (!path.isAbsolute(raw)) return { ok: false, exists: false, readable: false, isDirectory: false, path: raw, error: '必须填写 Termux 中的绝对路径' };
+  if (!path.isAbsolute(raw)) return { ok: false, exists: false, readable: false, isDirectory: false, path: raw, error: '必须填写运行 SillyTavern 的设备可读取的绝对路径' };
   const resolved = path.resolve(raw);
   try {
     const stat = fs.statSync(resolved);
@@ -429,7 +429,7 @@ async function init(router) {
 
   router.get('/', asyncRoute(legacyHandler));
   router.get('/health', async (_req, res) => res.json({
-    ok: true, plugin: PLUGIN_ID, version: '1.1.3', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
+    ok: true, plugin: PLUGIN_ID, version: '1.2.0', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
     localTracks: localTracks.length, localMusicDir: config.localMusicDir,
   }));
   router.get('/auth/status', asyncRoute(async (req, res) => res.json(await getLoginStatus(req.query.provider))));

@@ -10,6 +10,7 @@ find_st_dir() {
   local candidate
   for candidate in \
     "$PWD" "$HOME/SillyTavern" "$HOME/sillytavern" \
+    "$HOME/Desktop/SillyTavern" "$HOME/Documents/SillyTavern" "$HOME/Downloads/SillyTavern" \
     "/opt/SillyTavern" "/opt/sillytavern" "/app/SillyTavern" "/app/sillytavern" \
     "/workspace/SillyTavern" "/workspace/sillytavern"; do
     [[ -f "$candidate/server.js" ]] && { printf '%s\n' "$candidate"; return; }
@@ -60,16 +61,16 @@ backup_if_exists() {
 }
 
 mkdir -p "$PRESERVE_DIR"
-if [[ -d "$BACKEND_DST/data" ]]; then cp -a "$BACKEND_DST/data" "$PRESERVE_DIR/data"; fi
+if [[ -d "$BACKEND_DST/data" ]]; then cp -R "$BACKEND_DST/data" "$PRESERVE_DIR/data"; fi
 if [[ -z "$EXISTING_GITHUB_FRONTEND" ]]; then backup_if_exists "$FRONTEND_DST" frontend; fi
 backup_if_exists "$BACKEND_DST" backend
 mkdir -p "$(dirname "$FRONTEND_DST")" "$(dirname "$BACKEND_DST")"
-if [[ -z "$EXISTING_GITHUB_FRONTEND" ]]; then cp -a "$ROOT/frontend" "$FRONTEND_DST"; fi
-cp -a "$ROOT/backend" "$BACKEND_DST"
+if [[ -z "$EXISTING_GITHUB_FRONTEND" ]]; then cp -R "$ROOT/frontend" "$FRONTEND_DST"; fi
+cp -R "$ROOT/backend" "$BACKEND_DST"
 rm -rf "$BACKEND_DST/node_modules"
 if [[ -d "$PRESERVE_DIR/data" ]]; then
   rm -rf "$BACKEND_DST/data"
-  cp -a "$PRESERVE_DIR/data" "$BACKEND_DST/data"
+  cp -R "$PRESERVE_DIR/data" "$BACKEND_DST/data"
   echo '已保留网易云/QQ Cookie、本地目录设置与个人配置。'
 fi
 rm -rf "$PRESERVE_DIR"
@@ -78,7 +79,9 @@ rm -rf "$PRESERVE_DIR"
   npm install --omit=dev --ignore-scripts
 )
 chmod 700 "$BACKEND_DST/data" "$BACKEND_DST/data/local-music" 2>/dev/null || true
-find "$BACKEND_DST/data" -maxdepth 1 -type f \( -name '*cookie*.txt' -o -name 'config.json' \) -exec chmod 600 {} + 2>/dev/null || true
+for private_file in "$BACKEND_DST/data"/*cookie*.txt "$BACKEND_DST/data/config.json"; do
+  [[ -f "$private_file" ]] && chmod 600 "$private_file" 2>/dev/null || true
+done
 
 CONFIG="$ST_DIR/config.yaml"
 if [[ -f "$CONFIG" ]]; then

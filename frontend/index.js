@@ -6,6 +6,8 @@ const API_BASE = `/api/plugins/${EXTENSION_ID}`;
 const DEFAULTS = { provider: 'netease' };
 const REQUEST_TIMEOUT_MS = 20000;
 const TERMUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-termux.sh | bash';
+const WINDOWS_INSTALL_COMMAND = "irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1 | iex";
+const MACOS_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-macos.sh | bash';
 const LINUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-linux.sh | bash';
 const state = {
     qrTimer: null,
@@ -754,22 +756,26 @@ function panelHtml() {
 
           <details open><summary><b>服务器 / 设备本地音乐目录</b></summary>
             <p class="npms-help">请填写运行 SillyTavern 的设备或服务器能够读取的音乐目录绝对路径，先检测，再保存连接。支持递归扫描 MP3、FLAC、M4A、WAV、OGG、AAC、WebM 与 Opus。</p>
-            <input id="npms_local_dir" type="text" placeholder="例如 /home/user/Music 或 Termux 音乐目录的绝对路径">
-            <div class="npms-examples">Termux：<code>/data/data/com.termux/files/home/storage/music</code>；Linux：<code>/home/user/Music</code> 或容器持久化卷内路径。</div>
+            <input id="npms_local_dir" type="text" placeholder="例如 C:\\Users\\你\\Music、/Users/你/Music 或 /home/你/Music">
+            <div class="npms-examples">Windows：<code>C:\Users\你\Music</code>；macOS：<code>/Users/你/Music</code>；Linux：<code>/home/你/Music</code>；Termux：<code>/data/data/com.termux/files/home/storage/music</code>。Docker 请填写容器内路径。</div>
             <div class="npms-actions"><button id="npms_dir_inspect" class="menu_button">检测目录内容</button><button id="npms_dir_save" class="menu_button">保存并连接</button><button id="npms_rescan" class="menu_button">重新扫描</button></div>
           </details>
 
-          <details><summary><b>一键部署：Termux / Linux 云酒馆</b></summary>
-            <p class="npms-help">请选择 SillyTavern 实际运行的平台。安装器会部署前后端、保留已有账号数据，并开启 Server Plugin。</p>
+          <details><summary><b>一键部署：Android / Windows / macOS / Linux</b></summary>
+            <p class="npms-help">请选择 SillyTavern 实际运行的平台。安装器会部署前后端、保留已有账号数据并开启 Server Plugin；不会替你启动、停止或重启酒馆。</p>
             <b>Android · Termux</b>
             <div class="npms-command-row"><textarea id="npms_install_command_termux" rows="3" readonly>${TERMUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_termux" class="menu_button">复制 Termux 命令</button></div>
-            <b>Linux · 云服务器 / 面板服</b>
+            <b>Windows · PowerShell（Beta）</b>
+            <div class="npms-command-row"><textarea id="npms_install_command_windows" rows="3" readonly>${WINDOWS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_windows" class="menu_button">复制 Windows 命令</button></div>
+            <b>macOS · 终端</b>
+            <div class="npms-command-row"><textarea id="npms_install_command_macos" rows="3" readonly>${MACOS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_macos" class="menu_button">复制 macOS 命令</button></div>
+            <b>Linux · 桌面 / 云服务器 / 面板服 / Docker</b>
             <div class="npms-command-row"><textarea id="npms_install_command_linux" rows="3" readonly>${LINUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_linux" class="menu_button">复制 Linux 命令</button></div>
             <ol class="npms-steps">
-              <li>需要 Node.js 20+、npm 与 git；请使用运行 SillyTavern 的同一用户安装，不建议使用 sudo。</li>
-              <li>Linux 若无法自动找到酒馆，可设置 <code>ST_DIR=/实际/SillyTavern/路径</code>。</li>
-              <li>Docker 用户须把插件数据与音乐目录放在持久化卷内，并填写容器内可见路径。</li>
-              <li>安装完成后按原有方式重启 SillyTavern。</li>
+              <li>需要 Node.js 20+ 与 npm；远程一键安装还需要 Git（Windows 引导脚本使用系统下载与解压，无需 Git）。</li>
+              <li>自动找不到酒馆时：Windows 先设置 <code>$env:ST_DIR='D:\SillyTavern'</code>；macOS/Linux 使用 <code>ST_DIR=/实际/SillyTavern/路径</code>。</li>
+              <li>Linux/macOS 请使用运行 SillyTavern 的同一用户，不建议 sudo。Docker 须使用容器内可见路径与持久化卷。</li>
+              <li>安装完成后关闭旧酒馆，再按你原有的方式自行启动。</li>
             </ol>
           </details>
 
@@ -825,6 +831,8 @@ function bind() {
     root.querySelector('#npms_dir_inspect').addEventListener('click', inspectLocalDir);
     root.querySelector('#npms_dir_save').addEventListener('click', saveLocalDir);
     root.querySelector('#npms_copy_install_termux').addEventListener('click', () => copyText(TERMUX_INSTALL_COMMAND, 'Termux 部署命令已复制'));
+    root.querySelector('#npms_copy_install_windows').addEventListener('click', () => copyText(WINDOWS_INSTALL_COMMAND, 'Windows 部署命令已复制'));
+    root.querySelector('#npms_copy_install_macos').addEventListener('click', () => copyText(MACOS_INSTALL_COMMAND, 'macOS 部署命令已复制'));
     root.querySelector('#npms_copy_install_linux').addEventListener('click', () => copyText(LINUX_INSTALL_COMMAND, 'Linux 部署命令已复制'));
     root.querySelector('#npms_copy_api').addEventListener('click', () => copyText(API_BASE, '接口基址已复制'));
     root.querySelector('#npms_scan_scripts').addEventListener('click', scanPlayerScripts);
