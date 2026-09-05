@@ -291,13 +291,27 @@ function scoreTrackMatch(track, query) {
   if (name && name === target) score += 120;
   if (target && name.includes(target)) score += 50;
   if (name && artist && (target.includes(`${artist}${name}`) || target.includes(`${name}${artist}`))) score += 90;
-  if (track.source !== 'local') score += 2;
   return score;
 }
 
-async function searchProviderTracks(query, provider, limit = 10) {
+function findHighConfidenceLocalMatch(query) {
+  const target = normalizeMatchText(query);
+  if (!target) return null;
+  const candidates = searchLocal(query).map(publicTrack);
+  const exact = candidates.filter(track => {
+    const name = normalizeMatchText(track.name);
+    const artist = normalizeMatchText(Array.isArray(track.artist) ? track.artist.join(' ') : track.artist);
+    return Boolean(name) && (name === target || (artist && target.includes(name) && target.includes(artist)));
+  });
+  exact.sort((a, b) => scoreTrackMatch(b, query) - scoreTrackMatch(a, query));
+  return exact[0] || null;
+}
+
+async function searchProviderTracks(query, provider, limit = 10, { includeLocal = true, preferExactLocal = false } = {}) {
   provider = normalizeProvider(provider);
-  const local = searchLocal(query).map(publicTrack);
+  const highConfidenceLocal = includeLocal && preferExactLocal ? findHighConfidenceLocalMatch(query) : null;
+  if (highConfidenceLocal) return [highConfidenceLocal];
+  const local = includeLocal ? searchLocal(query).map(publicTrack) : [];
   let online = [];
   if (provider === 'qq') {
     const result = await qqSdk.search({ key: query, limit, page: 1 });
@@ -329,7 +343,7 @@ async function resolveInput(input, provider = 'netease') {
       const songmid = final.pathname.match(/\/songDetail\/([A-Za-z0-9]+)/i)?.[1] || final.searchParams.get('songmid') || '';
       if (!songmid) { const e = new Error('没有从 QQ 音乐分享链接中识别到单曲 ID'); e.status = 400; throw e; }
       const queryText = raw.replace(sharedUrl, '').replace(/@QQ音乐/gi, '').trim() || songmid;
-      const tracks = await searchProviderTracks(queryText, 'qq', 20);
+      const tracks = await searchProviderTracks(queryText, 'qq', 20, { includeLocal: false });
       const track = tracks.find(t => parseQqTrackId(t.id)?.songmid === songmid) || tracks.sort((a,b) => scoreTrackMatch(b, queryText) - scoreTrackMatch(a, queryText))[0];
       if (!track) { const e = new Error('QQ 音乐链接已识别，但没有取得歌曲资料'); e.status = 404; throw e; }
       return { ok: true, kind: 'track', provider, name: track.name, trackCount: 1, tracks: [track], resolvedUrl: href };
@@ -343,7 +357,7 @@ async function resolveInput(input, provider = 'netease') {
     return { ok: true, kind: 'track', provider, name: track.name, cover: song.al?.picUrl || '', trackCount: 1, tracks: [track], resolvedUrl: href };
   }
   if (/^\d{5,}$/.test(raw)) return { kind: 'playlist', ...(await getPlaylist(raw, provider)) };
-  const tracks = await searchProviderTracks(raw, provider, 12);
+  const tracks = await searchProviderTracks(raw, provider, 12, { preferExactLocal: true });
   if (!tracks.length) { const e = new Error(`没有找到“${raw}”`); e.status = 404; throw e; }
   tracks.sort((a,b) => scoreTrackMatch(b, raw) - scoreTrackMatch(a, raw));
   const track = tracks[0];
@@ -458,7 +472,9 @@ async function legacyHandler(request,response){
  const provider=normalizeProvider(rawSource);
  if(!type)return response.json({status:'running',provider,logged_in:provider==='qq'?Boolean(qqCookie):Boolean(userCookie),local_tracks:localTracks.length});
  if(type==='search'){
-  const keywords=String(q.name||''); const limit=Math.max(1,Math.min(50,Number(q.count)||5)); const local=searchLocal(keywords).map(publicTrack); let online=[];
+  const keywords=String(q.name||''); const limit=Math.max(1,Math.min(50,Number(q.count)||5)); const exactLocal=findHighConfidenceLocalMatch(keywords);
+  if(exactLocal)return response.json([exactLocal]);
+  const local=searchLocal(keywords).map(publicTrack); let online=[];
   try{if(provider==='qq'){const r=await qqSdk.search({key:keywords,limit,page:Math.max(1,Number(q.pages)||1)});online=(r?.body?.response?.data?.song?.list||[]).map(x=>({id:qqTrackId(x.songmid,x.strMediaMid||x.media_mid||x.songmid,x.albummid||''),name:x.songname||'',artist:(x.singer||[]).map(a=>a.name),album:x.albumname||'',lyric_id:x.songmid,source:'qq',album_mid:x.albummid||''}));}else{const r=await ncmApi.cloudsearch({keywords,limit,offset:((Number(q.pages)||1)-1)*limit,type:1,cookie:userCookie});online=(r?.body?.result?.songs||[]).map(x=>({id:x.id,name:x.name,artist:(x.ar||[]).map(a=>a.name),album:x.al?.name||'',lyric_id:x.id,source:'netease'}));}}catch(e){console.warn(`[${PLUGIN_ID}] ${provider} search failed:`,e.message)}
   return response.json([...local,...online].slice(0,limit));
  }
@@ -521,7 +537,7 @@ async function init(router) {
 
   router.get('/', asyncRoute(legacyHandler));
   router.get('/health', async (_req, res) => res.json({
-    ok: true, plugin: PLUGIN_ID, version: '1.5.0', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
+    ok: true, plugin: PLUGIN_ID, version: '1.5.1', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
     localTracks: localTracks.length, localMusicDir: config.localMusicDir,
   }));
   router.get('/auth/status', asyncRoute(async (req, res) => res.json(await getLoginStatus(req.query.provider))));
@@ -580,5 +596,5 @@ module.exports = {
   info: { id: PLUGIN_ID, name: 'Your Own Music Source', description: 'A private, multi-provider-ready account-backed and local-file music source for SillyTavern.' },
   init,
   exit,
-  _test: { normalizeCookie, stableLocalId, normalizeSearch, searchLocal, inspectLocalDirectory, extractPlaylistId, extractFirstHttpUrl, scoreTrackMatch, normalizeProvider, limitPlaylistTracks, findPlaylistArray, isPlaylistLikeItem, normalizeAccountPlaylist },
+  _test: { normalizeCookie, stableLocalId, normalizeSearch, searchLocal, inspectLocalDirectory, extractPlaylistId, extractFirstHttpUrl, scoreTrackMatch, findHighConfidenceLocalMatch, searchProviderTracks, normalizeProvider, limitPlaylistTracks, findPlaylistArray, isPlaylistLikeItem, normalizeAccountPlaylist },
 };
