@@ -830,17 +830,35 @@ function bind() {
     root.querySelector('#npms_scan_scripts').addEventListener('click', scanPlayerScripts);
 }
 
-jQuery(async () => {
+async function initializeExtensionPanel() {
     settings();
+    if (document.querySelector('#netease_personal_music_source_settings')) return true;
     const host = document.querySelector('#extensions_settings2') || document.querySelector('#extensions_settings');
-    if (!host || document.querySelector('#netease_personal_music_source_settings')) return;
+    if (!host) return false;
     host.insertAdjacentHTML('beforeend', panelHtml());
     bind();
     updateProviderUi();
     setBackendAvailability(false);
     renderMiniPlayer();
-    refreshStatus();
-});
+    void refreshStatus();
+    return true;
+}
+
+async function initializeWhenAvailable() {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+        if (await initializeExtensionPanel()) return;
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    console.warn('[你自己的音乐源] 找不到扩展设置容器，前端面板未挂载。');
+}
+
+// SillyTavern 安装扩展后会在当前页面动态载入模块，不会整页刷新。
+// 模块执行时立即初始化，才能像其他扩展一样在安装成功后马上出现。
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => void initializeWhenAvailable(), { once: true });
+} else {
+    void initializeWhenAvailable();
+}
 
 window.addEventListener('beforeunload', () => {
     stopQrPolling();
