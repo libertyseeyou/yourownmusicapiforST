@@ -11,6 +11,7 @@ const COOKIE_FILE = path.join(DATA_DIR, 'cookie.txt');
 const QQ_COOKIE_FILE = path.join(DATA_DIR, 'qq-cookie.txt');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const DEFAULT_LOCAL_DIR = path.join(DATA_DIR, 'local-music');
+const MAX_PLAYLIST_TRACKS = 500;
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.m4a', '.wav', '.ogg', '.aac', '.webm', '.opus']);
 const MIME_TYPES = {
   '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.wav': 'audio/wav',
@@ -97,7 +98,7 @@ function saveQqCookie(cookie) {
   fs.writeFileSync(QQ_COOKIE_FILE, `${qqCookie}\n`, { mode: 0o600 });
   try { fs.chmodSync(QQ_COOKIE_FILE, 0o600); } catch {}
 }
-function normalizeProvider(value) { return String(value || 'netease').toLowerCase() === 'qq' ? 'qq' : 'netease'; }
+function normalizeProvider(value) { const name = String(value || 'netease').toLowerCase(); return ['qq', 'tencent'].includes(name) ? 'qq' : 'netease'; }
 function qqTrackId(songmid, mediaMid = '', albumMid = '') { return `qq:${songmid}:${mediaMid || ''}:${albumMid || ''}`; }
 function parseQqTrackId(value) { const text=String(value||''); if(!text.startsWith('qq:')) return null; const [,songmid='',mediaMid='',albumMid='']=text.split(':'); return songmid?{songmid,mediaMid,albumMid}:null; }
 
@@ -349,21 +350,112 @@ async function resolveInput(input, provider = 'netease') {
   return { ok: true, kind: 'search', provider, name: track.name, trackCount: 1, tracks: [track], candidates: tracks.slice(0, 5) };
 }
 
-async function getPlaylist(input, provider = 'netease') {
-  provider=normalizeProvider(provider); const id=extractPlaylistId(input);
+function limitPlaylistTracks(tracks) {
+  return Array.isArray(tracks) ? tracks.slice(0, MAX_PLAYLIST_TRACKS) : [];
+}
+
+function findPlaylistArray(payload) {
+  const directCandidates = [
+    payload?.body?.response?.data?.playlists,
+    payload?.response?.data?.playlists,
+    payload?.body?.response?.data?.cdlist,
+    payload?.body?.response?.data?.list,
+    payload?.body?.response?.data?.v_playlist,
+    payload?.body?.response?.data?.disslist,
+    payload?.body?.response?.data,
+  ];
+  for (const candidate of directCandidates) {
+    if (Array.isArray(candidate) && candidate.some(isPlaylistLikeItem)) return candidate;
+  }
+  const queue = [payload];
+  const seen = new Set();
+  while (queue.length) {
+    const value = queue.shift();
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      if (value.some(isPlaylistLikeItem)) return value;
+      continue;
+    }
+    for (const child of Object.values(value)) queue.push(child);
+  }
+  return [];
+}
+
+function isPlaylistLikeItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  const hasId = Boolean(item.dissid || item.tid || item.dirid || item.disstid || item.id);
+  const hasPlaylistMetadata = Boolean(item.diss_name || item.dissname || item.song_cnt !== undefined || item.songnum !== undefined || item.song_count !== undefined || item.total_song_num !== undefined || item.picurl || item.logo);
+  return hasId && hasPlaylistMetadata;
+}
+
+function normalizeAccountPlaylist(item, provider, collected = false) {
+  if (provider === 'qq') {
+    const id = String(item?.dissid || item?.tid || item?.id || item?.dirid || item?.disstid || '');
+    if (!id) return null;
+    return {
+      id, provider, collected,
+      name: String(item?.diss_name || item?.dissname || item?.title || item?.name || `QQ 歌单 ${id}`),
+      cover: String(item?.logo || item?.picurl || item?.cover || item?.imgurl || ''),
+      trackCount: Number(item?.song_cnt || item?.songnum || item?.song_count || item?.total_song_num || 0),
+    };
+  }
+  const id = String(item?.id || '');
+  if (!id) return null;
+  return { id, provider, collected: Boolean(item?.subscribed), name: String(item?.name || `歌单 ${id}`), cover: String(item?.coverImgUrl || ''), trackCount: Number(item?.trackCount || 0) };
+}
+
+async function getAccountPlaylists(provider = 'netease') {
+  provider = normalizeProvider(provider);
+  const auth = await getLoginStatus(provider);
+  if (!auth.loggedIn) { const e = new Error(`请先登录${provider === 'qq' ? 'QQ 音乐' : '网易云音乐'}`); e.status = 401; throw e; }
+  if (provider === 'netease') {
+    const uid = auth.profile?.userId || auth.account?.id;
+    const result = await ncmApi.user_playlist({ uid, limit: 1000, offset: 0, cookie: userCookie });
+    const body = result?.body || {};
+    return (body.playlist || []).map(item => normalizeAccountPlaylist(item, provider)).filter(Boolean);
+  }
+  const uin = String(auth.account?.id || '');
+  const [createdResult, collectedResult] = await Promise.allSettled([
+    qqServices.getUserPlaylists({ uin, offset: 0, limit: 1000, cookie: qqCookie }),
+    qqServices.getUserCollectedSongLists({ uin, page: 1, limit: 1000, cookie: qqCookie }),
+  ]);
+  const createdOk = createdResult.status === 'fulfilled' && Number(createdResult.value?.status || 200) < 400;
+  const collectedOk = collectedResult.status === 'fulfilled' && Number(collectedResult.value?.status || 200) < 400;
+  const created = createdOk ? findPlaylistArray(createdResult.value) : [];
+  const collected = collectedOk ? findPlaylistArray(collectedResult.value) : [];
+  const unique = new Map();
+  for (const [items, isCollected] of [[created, false], [collected, true]]) {
+    for (const item of items) {
+      const playlist = normalizeAccountPlaylist(item, provider, isCollected);
+      if (playlist && !unique.has(playlist.id)) unique.set(playlist.id, playlist);
+    }
+  }
+  if (!unique.size && (!createdOk || !collectedOk)) {
+    const e = new Error('QQ 音乐账号歌单目录获取失败'); e.status = 502; throw e;
+  }
+  return [...unique.values()];
+}
+
+async function getPlaylist(input, provider = 'netease', requestedLimit = MAX_PLAYLIST_TRACKS) {
+  provider=normalizeProvider(provider); const id=extractPlaylistId(input); const limit=Math.max(1,Math.min(MAX_PLAYLIST_TRACKS,Number(requestedLimit)||MAX_PLAYLIST_TRACKS));
   if(!id){const e=new Error(`无法识别${provider==='qq'?'QQ 音乐':'网易云'}歌单 ID`);e.status=400;throw e;}
   if(provider==='qq'){
     const result=await qqServices.songListDetail({method:'get',params:{disstid:id}}); const body=result?.body||{}; const pl=body?.response?.cdlist?.[0];
     if(!pl||!Array.isArray(pl.songlist)){const e=new Error(body.error||'QQ 音乐没有返回可用歌单');e.status=502;e.body=body;throw e;}
-    return {ok:true,provider,id,name:pl.dissname||`QQ 歌单 ${id}`,cover:pl.logo||'',trackCount:pl.songnum||pl.songlist.length,tracks:pl.songlist.map(t=>({id:qqTrackId(t.mid,t.file?.media_mid||t.mid,t.album?.mid||''),name:t.name||t.title||'',artist:(t.singer||[]).map(a=>a.name).filter(Boolean),album:t.album?.name||'',lyric_id:t.mid,source:'qq',songmid:t.mid,media_mid:t.file?.media_mid||t.mid,album_mid:t.album?.mid||''}))};
+    const tracks=limitPlaylistTracks(pl.songlist).slice(0,limit).map(t=>({id:qqTrackId(t.mid,t.file?.media_mid||t.mid,t.album?.mid||''),name:t.name||t.title||'',artist:(t.singer||[]).map(a=>a.name).filter(Boolean),album:t.album?.name||'',lyric_id:t.mid,source:'qq',songmid:t.mid,media_mid:t.file?.media_mid||t.mid,album_mid:t.album?.mid||''}));
+    return {ok:true,provider,id,name:pl.dissname||`QQ 歌单 ${id}`,cover:pl.logo||'',trackCount:pl.songnum||pl.songlist.length,returnedCount:tracks.length,limit,tracks};
   }
   const result=await ncmApi.playlist_detail({id,cookie:userCookie}); const body=result?.body||{}; const pl=body.playlist;
   if(!pl||!Array.isArray(pl.tracks)){const e=new Error(body.message||'网易云没有返回可用歌单');e.status=502;e.body=body;throw e;}
-  return {ok:true,provider,id,name:pl.name||`歌单 ${id}`,cover:pl.coverImgUrl||'',trackCount:pl.trackCount||pl.tracks.length,tracks:pl.tracks.map(t=>({id:t.id,name:t.name||'',artist:(t.ar||[]).map(a=>a.name).filter(Boolean),album:t.al?.name||'',lyric_id:t.id,source:'netease'}))};
+  const tracks=limitPlaylistTracks(pl.tracks).slice(0,limit).map(t=>({id:t.id,name:t.name||'',artist:(t.ar||[]).map(a=>a.name).filter(Boolean),album:t.al?.name||'',lyric_id:t.id,source:'netease'}));
+  return {ok:true,provider,id,name:pl.name||`歌单 ${id}`,cover:pl.coverImgUrl||'',trackCount:pl.trackCount||pl.tracks.length,returnedCount:tracks.length,limit,tracks};
 }
 
 async function legacyHandler(request,response){
- const q=request.query||{}; const type=q.types; const provider=normalizeProvider(q.provider||q.source);
+ const q=request.query||{}; const type=q.types; const rawSource=String(q.provider||q.source||'netease').toLowerCase();
+ if(q.source && !['netease','qq','tencent'].includes(rawSource)) return jsonError(response,400,`暂不支持音源 ${rawSource}；本机适配仅支持 netease / tencent`);
+ const provider=normalizeProvider(rawSource);
  if(!type)return response.json({status:'running',provider,logged_in:provider==='qq'?Boolean(qqCookie):Boolean(userCookie),local_tracks:localTracks.length});
  if(type==='search'){
   const keywords=String(q.name||''); const limit=Math.max(1,Math.min(50,Number(q.count)||5)); const local=searchLocal(keywords).map(publicTrack); let online=[];
@@ -429,10 +521,19 @@ async function init(router) {
 
   router.get('/', asyncRoute(legacyHandler));
   router.get('/health', async (_req, res) => res.json({
-    ok: true, plugin: PLUGIN_ID, version: '1.3.2', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
+    ok: true, plugin: PLUGIN_ID, version: '1.4.0', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
     localTracks: localTracks.length, localMusicDir: config.localMusicDir,
   }));
   router.get('/auth/status', asyncRoute(async (req, res) => res.json(await getLoginStatus(req.query.provider))));
+  router.get('/account/playlists', asyncRoute(async (req, res) => {
+    const provider = normalizeProvider(req.query.provider);
+    const playlists = await getAccountPlaylists(provider);
+    res.json({ ok: true, provider, playlists, count: playlists.length, trackLimit: MAX_PLAYLIST_TRACKS });
+  }));
+  router.get('/account/playlist/:id', asyncRoute(async (req, res) => {
+    res.json(await getPlaylist(req.params.id, req.query.provider, req.query.limit));
+  }));
+
   router.post('/auth/cookie', asyncRoute(async (req,res)=>{const provider=normalizeProvider(req.body?.provider);const cookie=provider==='qq'?normalizeQqCookie(req.body?.cookie):normalizeCookie(req.body?.cookie);if(!cookie)return jsonError(res,400,'Cookie is empty');provider==='qq'?saveQqCookie(cookie):saveCookie(cookie);const status=await getLoginStatus(provider);return res.json({ok:true,message:status.loggedIn?'Cookie 已保存并通过验证':'Cookie 已保存，但平台未确认登录状态',...status});}));
   router.post('/auth/logout', async (req,res)=>{const provider=normalizeProvider(req.body?.provider);provider==='qq'?saveQqCookie(''):saveCookie('');res.json({ok:true,provider});});
   router.post('/auth/qr/start', asyncRoute(async (req,res)=>{const provider=normalizeProvider(req.body?.provider);if(provider==='qq'){const r=await qqSdk.getQQLoginQr();const b=r?.body||{};if(!b.img||!b.qrsig||!b.ptqrtoken)return jsonError(res,502,'QQ 音乐没有返回完整二维码数据',b);const key=Buffer.from(JSON.stringify({ptqrtoken:b.ptqrtoken,qrsig:b.qrsig})).toString('base64url');return res.json({ok:true,provider,message:'QQ 音乐二维码已生成',key,qrimg:b.img,qrurl:''});}const kr=await ncmApi.login_qr_key({});const key=extractQrKey(kr);if(!key)return jsonError(res,502,'网易云没有返回二维码 key');const qr=extractQrPayload(await ncmApi.login_qr_create({key,qrimg:true}));return res.json({ok:true,provider,message:'网易云二维码已生成',key,qrurl:qr.qrurl||'',qrimg:qr.qrimg||''});}));
@@ -479,5 +580,5 @@ module.exports = {
   info: { id: PLUGIN_ID, name: 'Your Own Music Source', description: 'A private, multi-provider-ready account-backed and local-file music source for SillyTavern.' },
   init,
   exit,
-  _test: { normalizeCookie, stableLocalId, normalizeSearch, searchLocal, inspectLocalDirectory, extractPlaylistId, extractFirstHttpUrl, scoreTrackMatch },
+  _test: { normalizeCookie, stableLocalId, normalizeSearch, searchLocal, inspectLocalDirectory, extractPlaylistId, extractFirstHttpUrl, scoreTrackMatch, normalizeProvider, limitPlaylistTracks, findPlaylistArray, isPlaylistLikeItem, normalizeAccountPlaylist },
 };

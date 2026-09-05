@@ -1,4 +1,4 @@
-# 你自己的音乐源 1.3.2
+# 你自己的音乐源 1.4.0
 
 作者：**灯灯&提提**
 
@@ -7,9 +7,11 @@
 ## 功能
 
 - 网易云音乐与 QQ 音乐二维码、Cookie 登录，两个平台凭据分开保存。
+- 登录后自动读取账号歌单目录；按需载入前 300 首（推荐）或前 500 首，后端硬上限 500 首。
 - 输入“歌曲 歌手”搜索最佳匹配；识别网易云、QQ 单曲短链与歌单分享链接。
 - 搜索、播放地址、歌词、封面、歌单与本地音乐 HTTP Range 流。
 - 内置黑白极简播放器；可扫描并为现有酒馆助手播放器创建适配副本，绝不覆盖原脚本。
+- 支持将 GDStudio/Meting 型第三方源播放器一键改为本机接口副本；网易云与 QQ 安全映射，未支持源不错误替换。
 - 支持 Android/Termux、Windows、macOS、Linux 桌面、云服务器、面板服与 Docker。
 - 从 SillyTavern 菜单安装前端后，面板会在当前页面动态出现，无需手动刷新。
 - 最终版纸张式分栏 UI：主页、播放器、本地音乐、部署与工具五个标签页，兼容手机和桌面。
@@ -163,6 +165,7 @@ Termux:  /data/data/com.termux/files/home/storage/music
 - `/input/resolve?provider=qq|netease&input=...`
 - `/?types=search|url|lyric|pic|playlist&provider=...`
 - `/playlist/resolve`
+- `/account/playlists`、`/account/playlist/:id`（账号歌单目录与限量载入）
 - `/local/list`
 - `/audio/:id`
 - `/auth/status`、`/auth/qr/start`、`/auth/qr/check`

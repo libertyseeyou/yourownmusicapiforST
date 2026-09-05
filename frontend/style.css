@@ -138,3 +138,8 @@
   .npms-panel .npms-tab { height: 35px; min-width: 66px; font-size: .8rem; }
   .npms-panel .npms-page { padding: 11px 8px 13px; }
 }
+.npms-select-row { display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content; gap: 8px; align-items: stretch; }
+.npms-panel select { min-width: 0; min-height: 40px; padding: 7px 9px; border: 0; border-bottom: 1px solid var(--npms-line); border-radius: 0; color: var(--npms-ink); background: var(--npms-wash); font-family: inherit; }
+.npms-panel select:focus { outline: 1px solid var(--npms-ink); outline-offset: 1px; }
+.npms-panel select:disabled { opacity: .55; }
+@container (max-width: 480px) { .npms-select-row { grid-template-columns: 1fr; } .npms-select-row .menu_button { width: 100%; } }
