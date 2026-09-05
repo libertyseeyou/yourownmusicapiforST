@@ -13,6 +13,7 @@ const state = {
     qrProvider: '',
     originalFetch: window.fetch.bind(window),
     operationId: 0,
+    backendReady: false,
     player: {
         audio: null,
         tracks: [],
@@ -76,8 +77,28 @@ function setBusy(buttonId, busy, busyText = '处理中…') {
         button.disabled = true;
     } else {
         button.textContent = button.dataset.originalText || button.textContent;
-        button.disabled = false;
+        button.disabled = !state.backendReady && BACKEND_CONTROL_SELECTORS.includes(`#${buttonId}`);
     }
+}
+
+const BACKEND_CONTROL_SELECTORS = [
+    '#npms_qr_start', '#npms_logout', '#npms_player_prev', '#npms_player_play', '#npms_player_next', '#npms_player_mode',
+    '#npms_player_volume', '#npms_playlist_input', '#npms_playlist_load', '#npms_local_load', '#npms_cookie', '#npms_cookie_save',
+    '#npms_local_dir', '#npms_dir_inspect', '#npms_dir_save', '#npms_rescan',
+];
+
+function setBackendAvailability(ready) {
+    state.backendReady = Boolean(ready);
+    for (const selector of BACKEND_CONTROL_SELECTORS) {
+        const node = document.querySelector(selector);
+        if (node) node.disabled = !state.backendReady;
+    }
+}
+
+function backendUnavailableError(status = 404) {
+    const error = new Error('后端尚未加载。请先展开“一键部署”，完成部署后重启 SillyTavern，再点“刷新状态”。');
+    error.payload = { backendUnavailable: true, httpStatus: status };
+    return error;
 }
 
 async function api(path, options = {}) {
@@ -95,8 +116,9 @@ async function api(path, options = {}) {
         const text = await response.text();
         let data;
         try { data = text ? JSON.parse(text) : {}; }
-        catch { data = { error: text || `HTTP ${response.status}` }; }
+        catch { data = { error: response.ok ? (text || `HTTP ${response.status}`) : `HTTP ${response.status}` }; }
         if (!response.ok) {
+            if (response.status === 404) throw backendUnavailableError(response.status);
             const error = new Error(data.error || data.message || `HTTP ${response.status}`);
             error.payload = { httpStatus: response.status, ...data };
             throw error;
@@ -155,6 +177,7 @@ async function refreshStatus() {
     setStatus('正在检查酒馆后端接口……');
     try {
         const health = await api('/health', { timeoutMs: 8000 });
+        setBackendAvailability(true);
         appendFeedback('后端健康检查通过', health, true);
         if (operation !== state.operationId) return;
         setStatus(`后端已连接，正在向${providerLabel()}验证登录状态……`);
@@ -168,8 +191,14 @@ async function refreshStatus() {
             await loadLocalPlayerTracks({ silent: true });
         }
     } catch (error) {
-        appendFeedback('刷新状态失败', error.payload || error.message, false);
-        setStatus(`刷新失败：${error.message}`, 'error');
+        if (error.payload?.backendUnavailable) {
+            setBackendAvailability(false);
+            appendFeedback('后端尚未加载', '完成下方一键部署后，请重启 SillyTavern，再点击“刷新状态”。', false);
+            setStatus('前端已安装；后端尚未加载。请完成一键部署并重启 SillyTavern。', 'warn');
+        } else {
+            appendFeedback('刷新状态失败', error.payload || error.message, false);
+            setStatus(`刷新失败：${error.message}`, 'error');
+        }
     } finally {
         setBusy('npms_refresh', false);
     }
@@ -808,6 +837,7 @@ jQuery(async () => {
     host.insertAdjacentHTML('beforeend', panelHtml());
     bind();
     updateProviderUi();
+    setBackendAvailability(false);
     renderMiniPlayer();
     refreshStatus();
 });

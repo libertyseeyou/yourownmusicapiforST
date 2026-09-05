@@ -429,7 +429,7 @@ async function init(router) {
 
   router.get('/', asyncRoute(legacyHandler));
   router.get('/health', async (_req, res) => res.json({
-    ok: true, plugin: PLUGIN_ID, version: '1.1.0', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
+    ok: true, plugin: PLUGIN_ID, version: '1.1.1', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
     localTracks: localTracks.length, localMusicDir: config.localMusicDir,
   }));
   router.get('/auth/status', asyncRoute(async (req, res) => res.json(await getLoginStatus(req.query.provider))));

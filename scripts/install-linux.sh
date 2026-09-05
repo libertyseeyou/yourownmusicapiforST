@@ -30,6 +30,20 @@ BACKUP_ROOT="${NPMS_BACKUP_ROOT:-$HOME/sillytavern-music-source-backups/$STAMP}"
 RUN_USER="${USER:-$(id -un 2>/dev/null || echo user)}"
 PRESERVE_DIR="${TMPDIR:-/tmp}/npms-preserve-$RUN_USER-$STAMP"
 
+EXISTING_GITHUB_FRONTEND=""
+for manifest in "$ST_DIR"/public/scripts/extensions/third-party/*/manifest.json; do
+  [[ -f "$manifest" ]] || continue
+  if grep -q 'github.com/libertyseeyou/yourownmusicapiforST' "$manifest"; then
+    EXISTING_GITHUB_FRONTEND="$(dirname "$manifest")"
+    break
+  fi
+done
+if [[ -n "$EXISTING_GITHUB_FRONTEND" ]]; then
+  FRONTEND_DST="$EXISTING_GITHUB_FRONTEND"
+  echo "检测到插件菜单已安装前端：$FRONTEND_DST"
+  echo '本次只安装/更新 Server Plugin 后端，不复制第二份前端。'
+fi
+
 command -v node >/dev/null || { echo '未找到 Node.js；请先安装 Node.js 20 或更高版本。' >&2; exit 1; }
 command -v npm >/dev/null || { echo '未找到 npm。' >&2; exit 1; }
 command -v git >/dev/null || echo '提示：本地安装不需要 git；一键下载脚本需要 git。'
@@ -47,10 +61,10 @@ backup_if_exists() {
 
 mkdir -p "$PRESERVE_DIR"
 if [[ -d "$BACKEND_DST/data" ]]; then cp -a "$BACKEND_DST/data" "$PRESERVE_DIR/data"; fi
-backup_if_exists "$FRONTEND_DST" frontend
+if [[ -z "$EXISTING_GITHUB_FRONTEND" ]]; then backup_if_exists "$FRONTEND_DST" frontend; fi
 backup_if_exists "$BACKEND_DST" backend
 mkdir -p "$(dirname "$FRONTEND_DST")" "$(dirname "$BACKEND_DST")"
-cp -a "$ROOT/frontend" "$FRONTEND_DST"
+if [[ -z "$EXISTING_GITHUB_FRONTEND" ]]; then cp -a "$ROOT/frontend" "$FRONTEND_DST"; fi
 cp -a "$ROOT/backend" "$BACKEND_DST"
 rm -rf "$BACKEND_DST/node_modules"
 if [[ -d "$PRESERVE_DIR/data" ]]; then
