@@ -1,0 +1,12 @@
+node_modules/
+*.log
+*.tgz
+*.zip
+*.tar.gz
+.DS_Store
+backend/data/cookie.txt
+backend/data/qq-cookie.txt
+backend/data/*cookie*.txt
+backend/data/local-music/*
+!backend/data/local-music/.gitkeep
+sillytavern-music-source-backups/

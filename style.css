@@ -1,0 +1,105 @@
+.npms-panel,.npms-panel * { box-sizing:border-box; writing-mode:horizontal-tb !important; text-orientation:mixed !important; }
+.npms-panel { --npms-ink:currentColor; --npms-border:color-mix(in srgb,currentColor 70%,transparent); }
+.npms-panel .inline-drawer-content { display:flex; flex-direction:column; gap:.7rem; }
+.npms-status { padding:.65rem .75rem; border:1px solid var(--SmartThemeBorderColor); border-radius:5px; overflow-wrap:anywhere; }
+.npms-status[data-kind="ok"] { border-color:#59805f; }
+.npms-status[data-kind="warn"] { border-color:#aa8240; }
+.npms-status[data-kind="error"] { border-color:#a24d49; }
+.npms-actions,.npms-row { display:flex; flex-flow:row wrap; gap:.5rem; align-items:center; }
+.npms-actions>.menu_button,.npms-row>.menu_button,.npms-script-card>.menu_button { width:auto !important; min-width:max-content; white-space:nowrap !important; display:inline-flex !important; flex-direction:row !important; align-items:center; justify-content:center; }
+.npms-panel textarea,.npms-panel input[type="text"] { width:100%; }
+.npms-qr { align-self:center; text-align:center; }
+.npms-qr img { display:block; width:min(260px,70vw); margin:.5rem auto; background:#fff; padding:8px; }
+.npms-panel details { border:1px solid var(--SmartThemeBorderColor); border-radius:5px; padding:.55rem; }
+.npms-panel details[open] { display:flex; flex-direction:column; gap:.6rem; }
+.npms-feedback { display:flex; flex-direction:column; gap:.4rem; max-height:260px; overflow:auto; }
+.npms-feedback-entry { white-space:pre-wrap; overflow-wrap:anywhere; font:.82em/1.45 monospace; padding:.5rem; border-left:3px solid #59805f; background:rgba(0,0,0,.13); }
+.npms-feedback-entry.is-error { border-left-color:#a24d49; }
+.npms-panel button:disabled { opacity:.55; cursor:not-allowed; }
+.npms-risk-link { display:inline-flex; margin-top:.4rem; }
+.npms-help { margin:0; line-height:1.55; opacity:.9; }
+.npms-examples,.npms-muted { font-size:.86em; opacity:.72; overflow-wrap:anywhere; }
+.npms-command-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.5rem; }
+.npms-command-row textarea { min-height:6rem; font:.82em/1.45 monospace; }
+.npms-steps { margin:.2rem 0; padding-left:1.5rem; line-height:1.6; }
+.npms-warning { padding:.55rem; border-left:3px solid #aa8240; background:rgba(170,130,64,.1); }
+.npms-api-list { display:grid; gap:.35rem; }
+.npms-api-list>code { display:block; padding:.4rem; overflow-x:auto; white-space:nowrap; background:rgba(0,0,0,.16); }
+.npms-api-list>span { margin:0 0 .4rem .1rem; opacity:.85; }
+
+/* 与参考正则播放器保持同一套尺寸与布局：一行标题/时间/四键/音量，下一行进度。 */
+.npms-mini-player {
+  width:100%; max-width:none; min-width:0; margin:2px auto 8px; padding:12px 14px;
+  color:#000 !important; background:#fff !important; border:1px solid #000 !important;
+  border-radius:0 !important; box-shadow:none !important; font:11px/1.2 monospace !important;
+  display:flex; flex-direction:column; gap:10px; overflow:hidden;
+}
+.npms-compact-main {
+  width:100%; min-width:0; height:24px; display:grid !important;
+  grid-template-columns:minmax(80px,1fr) max-content max-content max-content;
+  align-items:center; column-gap:10px; white-space:nowrap;
+}
+.npms-player-title-wrap { min-width:0; width:100%; overflow:hidden; white-space:nowrap; position:relative; }
+.npms-player-ticker {
+  display:inline-block; max-width:none; color:#000 !important; font:700 12px/1.2 monospace !important;
+  letter-spacing:0; white-space:nowrap; transform:translateX(0); will-change:transform;
+}
+.npms-player-ticker.is-scrolling { animation:npms-title-marquee 8s linear infinite alternate; }
+@keyframes npms-title-marquee {
+  0%,15% { transform:translateX(0); }
+  85%,100% { transform:translateX(var(--npms-scroll-distance,0)); }
+}
+.npms-player-time { color:#666 !important; font:10px/1 monospace !important; white-space:nowrap; user-select:none; }
+.npms-player-controls { display:flex !important; flex-flow:row nowrap !important; align-items:center; gap:4px; flex:none; white-space:nowrap; }
+.npms-player-key {
+  appearance:none !important; -webkit-appearance:none !important; width:auto !important; min-width:30px !important;
+  height:24px !important; min-height:24px !important; margin:0 !important; padding:1px 7px !important;
+  color:#000 !important; background:#fff !important; background-image:none !important; border:1px solid #000 !important;
+  border-radius:0 !important; box-shadow:none !important; font:10px/1 monospace !important;
+  white-space:nowrap !important; display:inline-flex !important; flex-direction:row !important;
+  align-items:center; justify-content:center; cursor:pointer;
+}
+.npms-player-key:hover { color:#fff !important; background:#000 !important; }
+.npms-player-key-mode { min-width:48px !important; }
+.npms-volume { min-width:94px; display:flex !important; flex-flow:row nowrap !important; align-items:center; gap:6px; color:#000 !important; font:700 10px/1 monospace !important; white-space:nowrap; }
+.npms-volume b { color:#000 !important; font:700 10px/1 monospace !important; }
+.npms-volume #npms_player_volume {
+  all:unset !important; appearance:none !important; -webkit-appearance:none !important;
+  display:block !important; width:58px !important; min-width:58px !important; height:2px !important;
+  margin:0 !important; padding:0 !important; border:0 !important; border-radius:0 !important;
+  outline:0 !important; box-shadow:none !important; background:#ccc !important; background-image:none !important;
+  cursor:pointer; writing-mode:horizontal-tb !important;
+}
+.npms-volume #npms_player_volume::-webkit-slider-runnable-track { width:100%; height:2px; border:0; border-radius:0; background:#ccc; box-shadow:none; }
+.npms-volume #npms_player_volume::-webkit-slider-thumb {
+  appearance:none !important; -webkit-appearance:none !important; width:6px !important; height:12px !important;
+  margin-top:-5px !important; border:0 !important; border-radius:0 !important; box-shadow:none !important;
+  background:#000 !important; background-image:none !important;
+}
+.npms-volume #npms_player_volume::-moz-range-track { height:2px; border:0; border-radius:0; background:#ccc; }
+.npms-volume #npms_player_volume::-moz-range-thumb { width:6px; height:12px; border:0; border-radius:0; background:#000; box-shadow:none; }
+.npms-progress-track { width:100%; height:4px !important; min-height:4px; margin:0; padding:0; border:0; border-radius:0; background:#eee !important; cursor:pointer; position:relative; overflow:hidden; }
+.npms-progress-bar { height:4px !important; width:0; border:0; border-radius:0; background:#000 !important; transition:width .1s linear; }
+
+.npms-playlist-loader { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:4px; }
+.npms-playlist-loader input { min-width:0; height:25px; padding:2px 5px; color:#000; background:#fff; border:1px solid #777; border-radius:0; font:10px monospace; }
+.npms-playlist-loader .menu_button { min-width:max-content; white-space:nowrap !important; writing-mode:horizontal-tb !important; }
+.npms-mini-player>small { color:#555; text-align:right; font:9px monospace; }
+
+.npms-script-candidates { display:flex; flex-direction:column; gap:.5rem; }
+.npms-script-card { display:flex; flex-direction:column; align-items:flex-start; gap:.45rem; padding:.6rem; border:1px solid var(--SmartThemeBorderColor); background:rgba(0,0,0,.07); }
+.npms-script-card>* { writing-mode:horizontal-tb !important; }
+.npms-candidate-urls { width:100%; max-height:100px; overflow:auto; padding:.4rem; white-space:pre-wrap; overflow-wrap:anywhere; background:rgba(0,0,0,.13); font-size:.78em; }
+
+@media(max-width:600px) {
+  .npms-command-row { grid-template-columns:1fr; }
+  .npms-mini-player { padding:8px 7px; gap:7px; }
+  .npms-compact-main { grid-template-columns:minmax(42px,1fr) max-content max-content max-content; column-gap:5px; }
+  .npms-player-ticker { font-size:10px !important; }
+  .npms-player-key { min-width:24px !important; height:20px !important; min-height:20px !important; padding:1px 4px !important; font-size:9px !important; }
+  .npms-player-key-mode { min-width:34px !important; }
+  .npms-volume { min-width:63px; gap:3px; font-size:9px !important; }
+  .npms-volume #npms_player_volume { width:38px !important; min-width:38px !important; }
+  .npms-playlist-loader { grid-template-columns:1fr 1fr; }
+  .npms-playlist-loader input { grid-column:1/-1; }
+}

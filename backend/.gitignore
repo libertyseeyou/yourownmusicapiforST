@@ -1,0 +1,4 @@
+node_modules/
+data/cookie.txt
+data/local-music/*
+!data/local-music/.gitkeep

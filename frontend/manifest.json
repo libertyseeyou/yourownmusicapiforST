@@ -1,0 +1,12 @@
+{
+  "display_name": "你自己的音乐源",
+  "loading_order": -900,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "灯灯 & user",
+  "version": "1.1.0",
+  "homePage": "https://github.com/libertyseeyou/yourownmusicapiforST",
+  "auto_update": true
+}

@@ -1,0 +1,16 @@
+{
+  "name": "sillytavern-netease-personal-music-source-backend",
+  "version": "1.1.0",
+  "description": "Private multi-provider-ready music source and login manager for SillyTavern.",
+  "main": "index.cjs",
+  "type": "commonjs",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@sansenjian/qq-music-api": "^2.6.0",
+    "NeteaseCloudMusicApi": "4.32.0"
+  }
+}

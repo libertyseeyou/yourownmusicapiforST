@@ -1,0 +1,16 @@
+{
+  "localMusicDir": "",
+  "providers": {
+    "netease": {
+      "enabled": true
+    },
+    "qq": {
+      "enabled": true,
+      "apiBase": ""
+    },
+    "kugou": {
+      "enabled": false,
+      "apiBase": ""
+    }
+  }
+}
