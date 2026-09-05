@@ -723,94 +723,33 @@ function adaptPlayerScript(candidate, disableSource, button) {
 }
 
 function panelHtml() {
-    const api = API_BASE;
-    return `
-    <div id="netease_personal_music_source_settings" class="extension_container npms-panel">
-      <div class="inline-drawer">
-        <div class="inline-drawer-toggle inline-drawer-header"><b>你自己的音乐源</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
-        <div class="inline-drawer-content">
-          <div id="npms_status" class="npms-status">等待检查后端</div>
-          <div class="npms-provider-switch" role="group" aria-label="切换音乐平台"><button type="button" data-provider="netease" class="npms-provider-button">网易云音乐</button><button type="button" data-provider="qq" class="npms-provider-button">QQ 音乐</button></div>
-          <div class="npms-actions"><button id="npms_refresh" class="menu_button">刷新状态</button><button id="npms_qr_start" class="menu_button">扫码登录</button><button id="npms_logout" class="menu_button">清除登录</button></div>
-          <div id="npms_qr_box" class="npms-qr" hidden><img id="npms_qr_image" alt="网易云登录二维码"><button id="npms_qr_cancel" class="menu_button">取消扫码</button></div>
-          <div class="npms-mini-player" aria-label="简易音乐播放器">
-            <div class="npms-compact-main">
-              <div id="npms_player_title_wrap" class="npms-player-title-wrap"><span id="npms_player_ticker" class="npms-player-ticker">Loading...</span></div>
-              <div id="npms_player_time" class="npms-player-time">0:00/0:00</div>
-              <div class="npms-player-controls">
-                <button id="npms_player_prev" class="npms-player-key" title="上一首">&lt;&lt;</button>
-                <button id="npms_player_play" class="npms-player-key" title="播放或暂停">&gt;</button>
-                <button id="npms_player_next" class="npms-player-key" title="下一首">&gt;&gt;</button>
-                <button id="npms_player_mode" class="npms-player-key npms-player-key-mode" title="切换循环方式">SEQ</button>
-              </div>
-              <label class="npms-volume"><b>VOL</b><input id="npms_player_volume" type="range" min="0" max="100" value="60" aria-label="音量"></label>
-            </div>
-            <div id="npms_player_progress_track" class="npms-progress-track" title="点击跳转进度"><div id="npms_player_progress" class="npms-progress-bar"></div></div>
-            <div class="npms-playlist-loader"><input id="npms_playlist_input" type="text" placeholder="歌曲 歌手 / 单曲或歌单分享链接"><button id="npms_playlist_load" class="menu_button">搜索 / 解析</button><button id="npms_local_load" class="menu_button">本地音乐</button></div>
-            <small><span id="npms_player_count">0 / 0</span></small>
-          </div>
-          <hr>
-          <label id="npms_cookie_label">平台 Cookie（仅提交到本机后端）</label>
-          <textarea id="npms_cookie" rows="3" placeholder="平台 Cookie"></textarea>
-          <button id="npms_cookie_save" class="menu_button">保存并验证 Cookie</button>
-
-          <details open><summary><b>服务器 / 设备本地音乐目录</b></summary>
-            <p class="npms-help">请填写运行 SillyTavern 的设备或服务器能够读取的音乐目录绝对路径，先检测，再保存连接。支持递归扫描 MP3、FLAC、M4A、WAV、OGG、AAC、WebM 与 Opus。</p>
-            <input id="npms_local_dir" type="text" placeholder="例如 C:\\Users\\你\\Music、/Users/你/Music 或 /home/你/Music">
-            <div class="npms-examples">Windows：<code>C:\Users\你\Music</code>；macOS：<code>/Users/你/Music</code>；Linux：<code>/home/你/Music</code>；Termux：<code>/data/data/com.termux/files/home/storage/music</code>。Docker 请填写容器内路径。</div>
-            <div class="npms-actions"><button id="npms_dir_inspect" class="menu_button">检测目录内容</button><button id="npms_dir_save" class="menu_button">保存并连接</button><button id="npms_rescan" class="menu_button">重新扫描</button></div>
-          </details>
-
-          <details><summary><b>一键部署：Android / Windows / macOS / Linux</b></summary>
-            <p class="npms-help">请选择 SillyTavern 实际运行的平台。安装器会部署前后端、保留已有账号数据并开启 Server Plugin；不会替你启动、停止或重启酒馆。</p>
-            <b>Android · Termux</b>
-            <div class="npms-command-row"><textarea id="npms_install_command_termux" rows="3" readonly>${TERMUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_termux" class="menu_button">复制 Termux 命令</button></div>
-            <b>Windows · PowerShell（Beta）</b>
-            <div class="npms-command-row"><textarea id="npms_install_command_windows" rows="3" readonly>${WINDOWS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_windows" class="menu_button">复制 Windows 命令</button></div>
-            <b>macOS · 终端</b>
-            <div class="npms-command-row"><textarea id="npms_install_command_macos" rows="3" readonly>${MACOS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_macos" class="menu_button">复制 macOS 命令</button></div>
-            <b>Linux · 桌面 / 云服务器 / 面板服 / Docker</b>
-            <div class="npms-command-row"><textarea id="npms_install_command_linux" rows="3" readonly>${LINUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_linux" class="menu_button">复制 Linux 命令</button></div>
-            <ol class="npms-steps">
-              <li>需要 Node.js 20+ 与 npm；远程一键安装还需要 Git（Windows 引导脚本使用系统下载与解压，无需 Git）。</li>
-              <li>自动找不到酒馆时：Windows 先设置 <code>$env:ST_DIR='D:\SillyTavern'</code>；macOS/Linux 使用 <code>ST_DIR=/实际/SillyTavern/路径</code>。</li>
-              <li>Linux/macOS 请使用运行 SillyTavern 的同一用户，不建议 sudo。Docker 须使用容器内可见路径与持久化卷。</li>
-              <li>安装完成后关闭旧酒馆，再按你原有的方式自行启动。</li>
-            </ol>
-          </details>
-
-          <details><summary><b>播放器接入接口</b></summary>
-            <p class="npms-help">接口与 SillyTavern 同源。播放器脚本可直接使用以下相对地址，无需写主机名或端口。</p>
-            <div class="npms-api-list">
-              <code>GET ${api}/?types=search&amp;name=歌名%20歌手&amp;count=5&amp;pages=1</code><span>搜索：返回歌曲数组，本地结果优先。</span>
-              <code>GET ${api}/?types=url&amp;id=歌曲ID&amp;br=320</code><span>播放地址：返回 <code>{"url":"..."}</code>。</span>
-              <code>GET ${api}/?types=lyric&amp;id=歌曲ID</code><span>歌词：返回 <code>lyric</code> 与 <code>tlyric</code>。</span>
-              <code>GET ${api}/?types=pic&amp;id=歌曲ID</code><span>封面兼容接口：返回 <code>{"url":"..."}</code>。</span>
-              <code>GET ${api}/?types=playlist&amp;id=歌单ID</code><span>兼容格式的网易云歌单曲目。</span>
-              <code>GET ${api}/input/resolve?provider=qq|netease&amp;input=歌曲歌手或分享链接</code><span>统一识别：文字搜索、单曲短链、歌单链接或歌单 ID。</span>
-              <code>GET ${api}/local/list</code><span>已扫描的本地曲目列表。</span>
-              <code>GET ${api}/audio/:本地歌曲ID</code><span>本地音频流，支持 Range 拖动进度。</span>
-              <code>GET ${api}/health</code><span>后端、目录和已启用音源状态。</span>
-            </div>
-            <button id="npms_copy_api" class="menu_button">复制接口基址</button>
-          </details>
-
-
-          <details><summary><b>适配现有酒馆助手播放器</b></summary>
-            <p class="npms-help">扫描酒馆助手中的脚本，寻找写死的音乐/歌词接口。适配时永远创建副本，不覆盖原脚本；原脚本是否停用由你确认。</p>
-            <div class="npms-actions"><button id="npms_scan_scripts" class="menu_button">扫描播放器脚本</button></div>
-            <div id="npms_script_candidates" class="npms-script-candidates"><span class="npms-muted">尚未扫描。</span></div>
-          </details>
-
-          <details open><summary><b>后端回传与操作记录</b></summary><div id="npms_feedback" class="npms-feedback" aria-live="polite"></div></details>
-          <small>这是面向单个 SillyTavern 用户的“你自己的音乐源”。账号凭据保存在后端，不写入聊天或前端设置。</small>
-        </div>
-      </div>
-    </div>`;
+ const api=API_BASE;
+ return `<div id="netease_personal_music_source_settings" class="extension_container npms-panel"><div class="inline-drawer npms-shell">
+ <div class="inline-drawer-toggle inline-drawer-header npms-titlebar"><div class="npms-brand"><span class="npms-brand-mark">♫</span><span class="npms-brand-copy"><b>你自己的音乐源</b><small>灯灯&提提 · PRIVATE MUSIC ROOM</small></span></div><div class="npms-title-side"><span class="npms-version">v1.3.0</span><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div></div>
+ <div class="inline-drawer-content npms-paper"><nav class="npms-tabs" role="tablist"><button class="npms-tab is-active" data-npms-tab="home">主页</button><button class="npms-tab" data-npms-tab="player">播放器</button><button class="npms-tab" data-npms-tab="local">本地音乐</button><button class="npms-tab" data-npms-tab="deploy">部署</button><button class="npms-tab" data-npms-tab="tools">工具</button></nav>
+ <section class="npms-page is-active" data-npms-page="home"><div class="npms-section-heading"><span>01</span><div><b>连接与账号</b><small>选择平台，并连接只属于你的曲库。</small></div></div><div id="npms_status" class="npms-status">等待检查后端</div><div class="npms-provider-switch"><button type="button" data-provider="netease" class="npms-provider-button"><span>网易云音乐</span><small>NETEASE</small></button><button type="button" data-provider="qq" class="npms-provider-button"><span>QQ 音乐</span><small>QQ MUSIC</small></button></div><div class="npms-actions npms-primary-actions"><button id="npms_refresh" class="menu_button">↻ 刷新状态</button><button id="npms_qr_start" class="menu_button">＋ 扫码登录</button><button id="npms_logout" class="menu_button">清除登录</button></div><div id="npms_qr_box" class="npms-qr" hidden><img id="npms_qr_image" alt="登录二维码"><button id="npms_qr_cancel" class="menu_button">取消扫码</button></div><div class="npms-field-card"><label id="npms_cookie_label" for="npms_cookie">平台 Cookie <small>仅提交到本机后端</small></label><textarea id="npms_cookie" rows="3" placeholder="在这里粘贴平台 Cookie"></textarea><button id="npms_cookie_save" class="menu_button">保存并验证 Cookie</button></div><p class="npms-privacy-note">账号凭据只保存在 SillyTavern 后端，不写入聊天、角色卡或前端设置。</p></section>
+ <section class="npms-page" data-npms-page="player" hidden><div class="npms-section-heading"><span>02</span><div><b>播放器</b><small>搜索歌曲、解析分享链接，或播放本地曲目。</small></div></div><div class="npms-mini-player"><div class="npms-compact-main"><div id="npms_player_title_wrap" class="npms-player-title-wrap"><span id="npms_player_ticker" class="npms-player-ticker">Loading...</span></div><div id="npms_player_time" class="npms-player-time">0:00/0:00</div><div class="npms-player-controls"><button id="npms_player_prev" class="npms-player-key">&lt;&lt;</button><button id="npms_player_play" class="npms-player-key">&gt;</button><button id="npms_player_next" class="npms-player-key">&gt;&gt;</button><button id="npms_player_mode" class="npms-player-key">SEQ</button></div><label class="npms-volume"><b>VOL</b><input id="npms_player_volume" type="range" min="0" max="100" value="60"></label></div><div id="npms_player_progress_track" class="npms-progress-track"><div id="npms_player_progress" class="npms-progress-bar"></div></div><div class="npms-playlist-loader"><input id="npms_playlist_input" type="text" placeholder="歌曲 歌手 / 单曲或歌单分享链接"><button id="npms_playlist_load" class="menu_button">搜索 / 解析</button><button id="npms_local_load" class="menu_button">本地音乐</button></div><div class="npms-player-foot"><span id="npms_player_count">0 / 0</span><span>SEQ · ONE · RND</span></div></div></section>
+ <section class="npms-page" data-npms-page="local" hidden><div class="npms-section-heading"><span>03</span><div><b>本地音乐</b><small>连接运行酒馆的设备或服务器中的音乐目录。</small></div></div><div class="npms-field-card"><label for="npms_local_dir">音乐目录绝对路径</label><input id="npms_local_dir" type="text" placeholder="C:\\Users\\你\\Music、/Users/你/Music 或 /home/你/Music"><div class="npms-examples">Windows：<code>C:\Users\你\Music</code><br>macOS：<code>/Users/你/Music</code><br>Linux：<code>/home/你/Music</code><br>Termux：<code>/data/data/com.termux/files/home/storage/music</code></div><div class="npms-actions"><button id="npms_dir_inspect" class="menu_button">检测目录</button><button id="npms_dir_save" class="menu_button">保存并连接</button><button id="npms_rescan" class="menu_button">重新扫描</button></div></div><div class="npms-format-strip"><b>支持格式</b><span>MP3</span><span>FLAC</span><span>M4A</span><span>WAV</span><span>OGG</span><span>AAC</span><span>WEBM</span><span>OPUS</span></div><p class="npms-privacy-note">Docker 请填写容器内可见路径，并使用持久化卷。</p></section>
+ <section class="npms-page" data-npms-page="deploy" hidden><div class="npms-section-heading"><span>04</span><div><b>一键部署</b><small>选择 SillyTavern 实际运行的平台。</small></div></div><p class="npms-help">保留已有账号数据并开启 Server Plugin；不会替你启动、停止或重启酒馆。</p><div class="npms-deploy-grid"><article class="npms-deploy-card"><header><b>Android</b><small>TERMUX</small></header><textarea id="npms_install_command_termux" rows="3" readonly>${TERMUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_termux" class="menu_button">复制命令</button></article><article class="npms-deploy-card"><header><b>Windows</b><small>POWERSHELL · BETA</small></header><textarea id="npms_install_command_windows" rows="3" readonly>${WINDOWS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_windows" class="menu_button">复制命令</button></article><article class="npms-deploy-card"><header><b>macOS</b><small>TERMINAL</small></header><textarea id="npms_install_command_macos" rows="3" readonly>${MACOS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_macos" class="menu_button">复制命令</button></article><article class="npms-deploy-card"><header><b>Linux</b><small>CLOUD · DOCKER</small></header><textarea id="npms_install_command_linux" rows="3" readonly>${LINUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_linux" class="menu_button">复制命令</button></article></div><ol class="npms-steps"><li>需要 Node.js 20+ 与 npm。</li><li>找不到酒馆时通过 <code>ST_DIR</code> 指定路径。</li><li>完成后关闭旧酒馆，再自行启动。</li></ol></section>
+ <section class="npms-page" data-npms-page="tools" hidden><div class="npms-section-heading"><span>05</span><div><b>工具与记录</b><small>接口、播放器适配和后端回传。</small></div></div><details class="npms-detail-card"><summary><b>播放器接入接口</b><span>API</span></summary><div class="npms-detail-body"><div class="npms-api-list"><code>GET ${api}/?types=search&amp;name=歌名%20歌手</code><span>搜索</span><code>GET ${api}/?types=url&amp;id=歌曲ID</code><span>播放</span><code>GET ${api}/?types=lyric&amp;id=歌曲ID</code><span>歌词</span><code>GET ${api}/input/resolve?provider=qq|netease&amp;input=...</code><span>统一解析</span><code>GET ${api}/local/list</code><span>本地列表</span><code>GET ${api}/health</code><span>后端状态</span></div><button id="npms_copy_api" class="menu_button">复制接口基址</button></div></details><details class="npms-detail-card"><summary><b>适配现有酒馆助手播放器</b><span>ADAPTER</span></summary><div class="npms-detail-body"><p class="npms-help">只创建适配副本，永不覆盖原脚本。</p><button id="npms_scan_scripts" class="menu_button">扫描播放器脚本</button><div id="npms_script_candidates" class="npms-script-candidates"><span class="npms-muted">尚未扫描。</span></div></div></details><details class="npms-detail-card" open><summary><b>后端回传与操作记录</b><span>LOG</span></summary><div class="npms-detail-body"><div id="npms_feedback" class="npms-feedback"></div></div></details></section>
+ </div></div></div>`;
 }
 function bind() {
     const root = document.querySelector('#netease_personal_music_source_settings');
     if (!root) return;
+    root.querySelectorAll('[data-npms-tab]').forEach(tab => tab.addEventListener('click', () => {
+        const name = tab.dataset.npmsTab;
+        root.querySelectorAll('[data-npms-tab]').forEach(item => {
+            const active = item === tab;
+            item.classList.toggle('is-active', active);
+            item.setAttribute('aria-selected', String(active));
+        });
+        root.querySelectorAll('[data-npms-page]').forEach(page => {
+            const active = page.dataset.npmsPage === name;
+            page.classList.toggle('is-active', active);
+            page.hidden = !active;
+        });
+    }));
     root.querySelectorAll('[data-provider]').forEach(button => button.addEventListener('click', () => switchProvider(button.dataset.provider)));
     root.querySelector('#npms_refresh').addEventListener('click', refreshStatus);
     root.querySelector('#npms_qr_start').addEventListener('click', startQrLogin);
