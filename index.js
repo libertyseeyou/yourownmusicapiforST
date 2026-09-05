@@ -9,6 +9,10 @@ const TERMUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/lib
 const WINDOWS_INSTALL_COMMAND = "irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1 | iex";
 const MACOS_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-macos.sh | bash';
 const LINUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-linux.sh | bash';
+const TERMUX_REMOVE_BACKEND_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-termux.sh | bash';
+const WINDOWS_REMOVE_BACKEND_COMMAND = "irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-windows.ps1 | iex";
+const MACOS_REMOVE_BACKEND_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-macos.sh | bash';
+const LINUX_REMOVE_BACKEND_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-linux.sh | bash';
 const state = {
     qrTimer: null,
     qrKey: '',
@@ -26,6 +30,9 @@ const state = {
         requestId: 0,
         playlistName: '',
         cover: '',
+        lyrics: [],
+        lyricIndex: -1,
+        lyricRequestId: 0,
     },
 };
 
@@ -269,6 +276,7 @@ function playerElements() {
         time: document.querySelector('#npms_player_time'),
         progress: document.querySelector('#npms_player_progress'),
         volume: document.querySelector('#npms_player_volume'),
+        lyric: document.querySelector('#npms_player_lyric'),
     };
 }
 
@@ -313,6 +321,82 @@ function resetPlayerMarquee() {
     }));
 }
 
+function parseLrc(text) {
+    return String(text || '').split(/\r?\n/).flatMap(line => {
+        const matches = [...line.matchAll(/\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g)];
+        const content = line.replace(/\[[^\]]+\]/g, '').trim();
+        if (!content) return [];
+        return matches.map(match => ({ time: Number(match[1]) * 60 + Number(match[2]) + Number(String(match[3] || '0').padEnd(3, '0')) / 1000, text: content }));
+    }).sort((a, b) => a.time - b.time);
+}
+
+function mergeLyrics(primary, translated) {
+    const translations = parseLrc(translated);
+    return parseLrc(primary).map(line => {
+        let nearest = null;
+        for (const item of translations) {
+            if (item.time > line.time + 0.35) break;
+            if (Math.abs(item.time - line.time) <= 0.35) nearest = item;
+        }
+        return { ...line, translation: nearest?.text || '' };
+    });
+}
+
+function renderCurrentLyric(force = false) {
+    const audio = state.player.audio;
+    const ui = playerElements();
+    if (!ui.lyric) return;
+    const lyrics = state.player.lyrics;
+    let index = -1;
+    const current = audio?.currentTime || 0;
+    for (let i = lyrics.length - 1; i >= 0; i--) { if (current >= lyrics[i].time) { index = i; break; } }
+    if (!force && index === state.player.lyricIndex) return;
+    state.player.lyricIndex = index;
+    const track = currentPlayerTrack();
+    const fallback = track ? `${track.name} · ${(Array.isArray(track.artist) ? track.artist.join(' / ') : track.artist || '')}` : '歌词将在播放时显示';
+    const makeLine = (text, className, translation = '') => {
+        const node = document.createElement('div');
+        node.className = className;
+        const primary = document.createElement('span');
+        primary.textContent = text || '';
+        node.append(primary);
+        if (translation) {
+            const translated = document.createElement('small');
+            translated.textContent = translation;
+            node.append(translated);
+        }
+        return node;
+    };
+    if (index < 0) {
+        ui.lyric.replaceChildren(makeLine(fallback, 'npms-lyric-line is-current'));
+    } else {
+        const previous = lyrics[index - 1];
+        const currentLine = lyrics[index];
+        const next = lyrics[index + 1];
+        ui.lyric.replaceChildren(
+            makeLine(previous?.text || '', 'npms-lyric-line is-previous'),
+            makeLine(currentLine.text, 'npms-lyric-line is-current', currentLine.translation),
+            makeLine(next?.text || '', 'npms-lyric-line is-next'),
+        );
+        ui.lyric.classList.remove('is-advancing');
+        void ui.lyric.offsetWidth;
+        ui.lyric.classList.add('is-advancing');
+    }
+}
+
+async function loadCurrentTrackLyrics(track) {
+    const requestId = ++state.player.lyricRequestId;
+    state.player.lyrics = []; state.player.lyricIndex = -1; renderCurrentLyric(true);
+    if (!track || track.source === 'local') return;
+    try {
+        const provider = track.source === 'qq' ? 'qq' : 'netease';
+        const data = await api(`/?types=lyric&provider=${provider}&id=${encodeURIComponent(track.id)}`, { timeoutMs: 20000 });
+        if (requestId !== state.player.lyricRequestId) return;
+        state.player.lyrics = mergeLyrics(data.lyric, data.tlyric);
+        state.player.lyricIndex = -1; renderCurrentLyric(true);
+    } catch { /* Lyrics are optional and must never block playback. */ }
+}
+
 function ensureMiniAudio() {
     if (state.player.audio) return state.player.audio;
     const audio = new Audio();
@@ -322,7 +406,7 @@ function ensureMiniAudio() {
     audio.addEventListener('pause', renderMiniPlayer);
     audio.addEventListener('loadedmetadata', updatePlayerProgress);
     audio.addEventListener('durationchange', updatePlayerProgress);
-    audio.addEventListener('timeupdate', updatePlayerProgress);
+    audio.addEventListener('timeupdate', () => { updatePlayerProgress(); renderCurrentLyric(); });
     audio.addEventListener('ended', () => {
         if (state.player.mode === 'one') {
             audio.currentTime = 0;
@@ -377,7 +461,8 @@ function playerFailure(label, error) {
 }
 
 async function resolvePlayerTrackUrl(track) {
-    const data = await api(`/?types=url&provider=${encodeURIComponent(track.source === 'qq' ? 'qq' : currentProvider())}&id=${encodeURIComponent(track.id)}&br=320`, { timeoutMs: 20000 });
+    const provider = track.source === 'qq' ? 'qq' : 'netease';
+    const data = await api(`/?types=url&provider=${provider}&id=${encodeURIComponent(track.id)}&br=320`, { timeoutMs: 20000 });
     appendFeedback('简易播放器音源回传', { track: track.name, id: track.id, hasUrl: Boolean(data.url), source: track.source }, Boolean(data.url));
     if (!data.url) throw new Error(`没有取得《${track.name}》的可播放地址`);
     return new URL(data.url, location.origin).href;
@@ -397,6 +482,7 @@ async function playPlayerIndex(index, autoplay = true) {
         const url = await resolvePlayerTrackUrl(track);
         if (requestId !== state.player.requestId) return;
         const audio = ensureMiniAudio();
+        void loadCurrentTrackLyrics(track);
         audio.src = url;
         audio.load();
         state.player.loading = false;
@@ -450,21 +536,29 @@ function cyclePlayerMode() {
     renderMiniPlayer();
 }
 
-function setPlayerTracks(tracks, { name = '', cover = '', feedbackLabel = '播放器列表已载入' } = {}) {
-    const usable = Array.isArray(tracks) ? tracks.filter(track => track?.id && track?.name) : [];
+function trackKey(track) { return `${track?.source || 'netease'}:${track?.id || ''}`; }
+function uniqueTracks(tracks) {
+    const seen = new Set();
+    return (Array.isArray(tracks) ? tracks : []).filter(track => track?.id && track?.name && !seen.has(trackKey(track)) && seen.add(trackKey(track)));
+}
+
+function setPlayerTracks(tracks, { name = '', cover = '', feedbackLabel = '播放器列表已载入', mergeLocal = false, kind = 'network', preservePlayback = false } = {}) {
+    let usable = uniqueTracks(tracks);
     if (!usable.length) throw new Error('没有找到可播放的歌曲');
+    if (mergeLocal) {
+        const kept = state.player.tracks.filter(track => kind === 'local' ? track.source !== 'local' : track.source === 'local');
+        usable = kind === 'local' ? uniqueTracks([...kept, ...usable]) : uniqueTracks([...usable, ...kept]);
+    }
     const audio = ensureMiniAudio();
-    audio.pause();
-    audio.removeAttribute('src');
-    audio.load();
-    state.player.requestId += 1;
+    const currentKey = trackKey(currentPlayerTrack());
+    if (!preservePlayback) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.player.requestId += 1; }
     state.player.tracks = usable;
-    state.player.index = 0;
+    state.player.index = preservePlayback ? Math.max(0, usable.findIndex(track => trackKey(track) === currentKey)) : 0;
     state.player.loading = false;
-    state.player.playlistName = name;
-    state.player.cover = cover;
-    renderMiniPlayer();
-    appendFeedback(feedbackLabel, { name, trackCount: usable.length, autoplay: false }, true);
+    state.player.playlistName = name; state.player.cover = cover;
+    if (!preservePlayback) { state.player.lyrics = []; state.player.lyricIndex = -1; }
+    renderMiniPlayer(); renderCurrentLyric(true);
+    appendFeedback(feedbackLabel, { name, trackCount: usable.length }, true);
     return usable.length;
 }
 
@@ -472,8 +566,8 @@ async function loadLocalPlayerTracks({ silent = false } = {}) {
     setBusy('npms_local_load', true, '载入中…');
     try {
         const tracks = await api('/local/list', { timeoutMs: 15000 });
-        const count = setPlayerTracks(tracks, { name: 'LOCAL ARCHIVE · 本地收藏', feedbackLabel: '本地音乐已载入简易播放器' });
-        setStatus(`已把 ${count} 首本地音乐载入播放器`, 'ok');
+        const count = setPlayerTracks(tracks, { name: state.player.playlistName || 'LOCAL ARCHIVE · 本地收藏', feedbackLabel: '本地音乐已融合到播放器', mergeLocal: true, kind: 'local', preservePlayback: true });
+        setStatus(`本地音乐已融合，当前列表共 ${count} 首`, 'ok');
     } catch (error) {
         appendFeedback('载入本地音乐失败', error.payload || error.message, false);
         if (!silent) setStatus(`载入本地音乐失败：${error.message}`, 'error');
@@ -490,7 +584,9 @@ async function resolvePlayerInput() {
         const tracks = Array.isArray(data.tracks) ? data.tracks.filter(track => track?.id && track?.name) : [];
         if (!tracks.length) throw new Error('歌单中没有可用歌曲');
         const label = data.kind === 'playlist' ? `歌单“${data.name}”` : `歌曲“${data.name}”`;
-        const count = setPlayerTracks(tracks, { name: data.name, cover: data.cover || '', feedbackLabel: '播放器输入识别回传' });
+        const isPlaylist = data.kind === 'playlist';
+        const count = setPlayerTracks(tracks, { name: data.name, cover: data.cover || '', feedbackLabel: '播放器输入识别回传', mergeLocal: isPlaylist, kind: 'network' });
+        if (isPlaylist) void playPlayerIndex(0, true);
         const inputNode = document.querySelector('#npms_playlist_input');
         if (inputNode) inputNode.value = '';
         setStatus(`已匹配${label}${count > 1 ? `，共 ${count} 首` : ''}`, 'ok');
@@ -548,7 +644,8 @@ async function loadSelectedAccountPlaylist() {
     try {
         const data = await api(`/account/playlist/${encodeURIComponent(id)}?provider=${encodeURIComponent(provider)}&limit=${requestedLimit}`, { timeoutMs: 45000 });
         const tracks = Array.isArray(data.tracks) ? data.tracks.slice(0, requestedLimit) : [];
-        const count = setPlayerTracks(tracks, { name: data.name, cover: data.cover || '', feedbackLabel: '账号歌单已载入播放器' });
+        const count = setPlayerTracks(tracks, { name: data.name, cover: data.cover || '', feedbackLabel: '账号歌单已载入播放器', mergeLocal: true, kind: 'network' });
+        void playPlayerIndex(0, true);
         const truncated = Number(data.trackCount) > count;
         setStatus(`已载入“${data.name}”${count} 首${truncated ? `（已按设置截取前 ${requestedLimit} 首）` : ''}`, 'ok');
         document.querySelector('[data-npms-tab="player"]')?.click();
@@ -805,10 +902,14 @@ function panelHtml() {
  return `<div id="netease_personal_music_source_settings" class="extension_container npms-panel"><div class="inline-drawer npms-shell">
  <div class="inline-drawer-toggle inline-drawer-header"><b>你自己的音乐源</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
  <div class="inline-drawer-content npms-paper"><nav class="npms-tabs" role="tablist"><button class="npms-tab is-active" data-npms-tab="home">主页</button><button class="npms-tab" data-npms-tab="player">播放器</button><button class="npms-tab" data-npms-tab="local">本地音乐</button><button class="npms-tab" data-npms-tab="deploy">部署</button><button class="npms-tab" data-npms-tab="tools">工具</button></nav>
- <section class="npms-page is-active" data-npms-page="home"><div class="npms-section-heading"><span>01</span><div><b>连接与账号</b><small>选择平台，并连接只属于你的曲库。</small></div></div><div id="npms_status" class="npms-status">等待检查后端</div><div class="npms-provider-switch"><button type="button" data-provider="netease" class="npms-provider-button"><span>网易云音乐</span><small>NETEASE</small></button><button type="button" data-provider="qq" class="npms-provider-button"><span>QQ 音乐</span><small>QQ MUSIC</small></button></div><div class="npms-actions npms-primary-actions"><button id="npms_refresh" class="menu_button">↻ 刷新状态</button><button id="npms_qr_start" class="menu_button">＋ 扫码登录</button><button id="npms_logout" class="menu_button">清除登录</button></div><div class="npms-field-card npms-account-playlists"><label for="npms_account_playlist">账号歌单 <small>登录后自动读取目录；每个歌单最多载入 500 首</small></label><div class="npms-select-row"><select id="npms_account_playlist" disabled><option value="">登录后自动显示账号歌单目录</option></select><select id="npms_account_playlist_limit" aria-label="歌单载入数量"><option value="300" selected>前 300 首（推荐）</option><option value="500">前 500 首</option></select><button id="npms_account_playlist_load" class="menu_button" disabled>载入所选歌单</button></div></div><div id="npms_qr_box" class="npms-qr" hidden><img id="npms_qr_image" alt="登录二维码"><button id="npms_qr_cancel" class="menu_button">取消扫码</button></div><div class="npms-field-card"><label id="npms_cookie_label" for="npms_cookie">平台 Cookie <small>仅提交到本机后端</small></label><textarea id="npms_cookie" rows="3" placeholder="在这里粘贴平台 Cookie"></textarea><button id="npms_cookie_save" class="menu_button">保存并验证 Cookie</button></div><p class="npms-privacy-note">账号凭据只保存在 SillyTavern 后端，不写入聊天、角色卡或前端设置。</p></section>
- <section class="npms-page" data-npms-page="player" hidden><div class="npms-section-heading"><span>02</span><div><b>播放器</b><small>搜索歌曲、解析分享链接，或播放本地曲目。</small></div></div><div class="npms-mini-player"><div class="npms-compact-main"><div id="npms_player_title_wrap" class="npms-player-title-wrap"><span id="npms_player_ticker" class="npms-player-ticker">Loading...</span></div><div id="npms_player_time" class="npms-player-time">0:00/0:00</div><div class="npms-player-controls"><button id="npms_player_prev" class="npms-player-key">&lt;&lt;</button><button id="npms_player_play" class="npms-player-key">&gt;</button><button id="npms_player_next" class="npms-player-key">&gt;&gt;</button><button id="npms_player_mode" class="npms-player-key">SEQ</button></div><label class="npms-volume"><b>VOL</b><input id="npms_player_volume" type="range" min="0" max="100" value="60"></label></div><div id="npms_player_progress_track" class="npms-progress-track"><div id="npms_player_progress" class="npms-progress-bar"></div></div><div class="npms-playlist-loader"><input id="npms_playlist_input" type="text" placeholder="歌曲 歌手 / 单曲或歌单分享链接"><button id="npms_playlist_load" class="menu_button">搜索 / 解析</button><button id="npms_local_load" class="menu_button">本地音乐</button></div><div class="npms-player-foot"><span id="npms_player_count">0 / 0</span><span>SEQ · ONE · RND</span></div></div></section>
+ <section class="npms-page is-active" data-npms-page="home"><div class="npms-section-heading"><span>01</span><div><b>连接与账号</b><small>选择平台，并连接只属于你的曲库。</small></div></div><div id="npms_status" class="npms-status">等待检查后端</div><div class="npms-provider-switch"><button type="button" data-provider="netease" class="npms-provider-button"><span>网易云音乐</span><small>NETEASE</small></button><button type="button" data-provider="qq" class="npms-provider-button"><span>QQ 音乐</span><small>QQ MUSIC</small></button></div><div class="npms-actions npms-primary-actions"><button id="npms_refresh" class="menu_button">↻ 刷新状态</button><button id="npms_qr_start" class="menu_button">＋ 扫码登录</button><button id="npms_logout" class="menu_button">清除登录</button></div><div id="npms_qr_box" class="npms-qr" hidden><img id="npms_qr_image" alt="登录二维码"><button id="npms_qr_cancel" class="menu_button">取消扫码</button></div><details class="npms-detail-card npms-cookie-fold"><summary><b>Cookie 登录</b><span>可选</span></summary><div class="npms-detail-body"><div class="npms-field-card"><label id="npms_cookie_label" for="npms_cookie">平台 Cookie <small>仅提交到本机后端</small></label><textarea id="npms_cookie" rows="3" placeholder="在这里粘贴平台 Cookie"></textarea><button id="npms_cookie_save" class="menu_button">保存并验证 Cookie</button></div></div></details><p class="npms-privacy-note">账号凭据只保存在 SillyTavern 后端，不写入聊天、角色卡或前端设置。</p></section>
+ <section class="npms-page" data-npms-page="player" hidden><div class="npms-section-heading"><span>02</span><div><b>播放器</b><small>搜索歌曲、解析分享链接，或播放本地曲目。</small></div></div><div class="npms-field-card npms-account-playlists"><label for="npms_account_playlist">账号歌单 <small>登录后自动读取目录；每个歌单最多载入 500 首</small></label><div class="npms-select-row"><select id="npms_account_playlist" disabled><option value="">登录后自动显示账号歌单目录</option></select><select id="npms_account_playlist_limit" aria-label="歌单载入数量"><option value="300" selected>前 300 首（推荐）</option><option value="500">前 500 首</option></select><button id="npms_account_playlist_load" class="menu_button" disabled>载入所选歌单</button></div></div><div class="npms-mini-player"><div class="npms-compact-main"><div id="npms_player_title_wrap" class="npms-player-title-wrap"><span id="npms_player_ticker" class="npms-player-ticker">Loading...</span></div><div id="npms_player_time" class="npms-player-time">0:00/0:00</div><div class="npms-player-controls"><button id="npms_player_prev" class="npms-player-key">&lt;&lt;</button><button id="npms_player_play" class="npms-player-key">&gt;</button><button id="npms_player_next" class="npms-player-key">&gt;&gt;</button><button id="npms_player_mode" class="npms-player-key">SEQ</button></div><label class="npms-volume"><b>VOL</b><input id="npms_player_volume" type="range" min="0" max="100" value="60"></label></div><div id="npms_player_progress_track" class="npms-progress-track"><div id="npms_player_progress" class="npms-progress-bar"></div></div><div class="npms-lyric-window"><div id="npms_player_lyric" class="npms-lyric-stack"><div class="npms-lyric-line is-current"><span>歌词将在播放时显示</span></div></div></div><div class="npms-playlist-loader"><input id="npms_playlist_input" type="text" placeholder="歌曲 歌手 / 单曲或歌单分享链接"><button id="npms_playlist_load" class="menu_button">搜索 / 解析</button><button id="npms_local_load" class="menu_button">本地音乐</button></div><div class="npms-player-foot"><span id="npms_player_count">0 / 0</span><span>SEQ · ONE · RND</span></div></div></section>
  <section class="npms-page" data-npms-page="local" hidden><div class="npms-section-heading"><span>03</span><div><b>本地音乐</b><small>连接运行酒馆的设备或服务器中的音乐目录。</small></div></div><div class="npms-field-card"><label for="npms_local_dir">音乐目录绝对路径</label><input id="npms_local_dir" type="text" placeholder="C:\\Users\\你\\Music、/Users/你/Music 或 /home/你/Music"><div class="npms-examples">Windows：<code>C:\Users\你\Music</code><br>macOS：<code>/Users/你/Music</code><br>Linux：<code>/home/你/Music</code><br>Termux：<code>/data/data/com.termux/files/home/storage/music</code></div><div class="npms-actions"><button id="npms_dir_inspect" class="menu_button">检测目录</button><button id="npms_dir_save" class="menu_button">保存并连接</button><button id="npms_rescan" class="menu_button">重新扫描</button></div></div><div class="npms-format-strip"><b>支持格式</b><span>MP3</span><span>FLAC</span><span>M4A</span><span>WAV</span><span>OGG</span><span>AAC</span><span>WEBM</span><span>OPUS</span></div><p class="npms-privacy-note">Docker 请填写容器内可见路径，并使用持久化卷。</p></section>
- <section class="npms-page" data-npms-page="deploy" hidden><div class="npms-section-heading"><span>04</span><div><b>一键部署</b><small>选择 SillyTavern 实际运行的平台。</small></div></div><div class="npms-deploy-grid"><article class="npms-deploy-card"><header><b>Android</b><small>TERMUX</small></header><textarea id="npms_install_command_termux" rows="3" readonly>${TERMUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_termux" class="menu_button">复制命令</button></article><article class="npms-deploy-card"><header><b>Windows</b><small>POWERSHELL · BETA</small></header><textarea id="npms_install_command_windows" rows="3" readonly>${WINDOWS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_windows" class="menu_button">复制命令</button></article><article class="npms-deploy-card"><header><b>macOS</b><small>TERMINAL</small></header><textarea id="npms_install_command_macos" rows="3" readonly>${MACOS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_macos" class="menu_button">复制命令</button></article><article class="npms-deploy-card"><header><b>Linux</b><small>CLOUD · DOCKER</small></header><textarea id="npms_install_command_linux" rows="3" readonly>${LINUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_linux" class="menu_button">复制命令</button></article></div><ol class="npms-steps"><li>需要 Node.js 20+ 与 npm。</li><li>找不到酒馆时通过 <code>ST_DIR</code> 指定路径。</li><li>完成后关闭旧酒馆，再自行启动。</li></ol></section>
+ <section class="npms-page" data-npms-page="deploy" hidden><div class="npms-section-heading"><span>04</span><div><b>后端管理</b><small>选择操作与 SillyTavern 实际运行的平台。</small></div></div><div class="npms-manage-tabs"><button class="npms-manage-tab is-active" data-manage-mode="install">安装 / 更新后端</button><button class="npms-manage-tab" data-manage-mode="remove">删除后端</button></div><div class="npms-deploy-grid">
+<article class="npms-deploy-card"><header><b>Android</b><small>TERMUX</small></header><textarea id="npms_install_command_termux" data-install-command="${TERMUX_INSTALL_COMMAND}" data-remove-command="${TERMUX_REMOVE_BACKEND_COMMAND}" rows="3" readonly>${TERMUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_termux" class="menu_button">复制安装 / 更新命令</button></article>
+<article class="npms-deploy-card"><header><b>Windows</b><small>POWERSHELL · BETA</small></header><textarea id="npms_install_command_windows" data-install-command="${WINDOWS_INSTALL_COMMAND}" data-remove-command="${WINDOWS_REMOVE_BACKEND_COMMAND}" rows="3" readonly>${WINDOWS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_windows" class="menu_button">复制安装 / 更新命令</button></article>
+<article class="npms-deploy-card"><header><b>macOS</b><small>TERMINAL</small></header><textarea id="npms_install_command_macos" data-install-command="${MACOS_INSTALL_COMMAND}" data-remove-command="${MACOS_REMOVE_BACKEND_COMMAND}" rows="3" readonly>${MACOS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_macos" class="menu_button">复制安装 / 更新命令</button></article>
+<article class="npms-deploy-card"><header><b>Linux</b><small>CLOUD · DOCKER</small></header><textarea id="npms_install_command_linux" data-install-command="${LINUX_INSTALL_COMMAND}" data-remove-command="${LINUX_REMOVE_BACKEND_COMMAND}" rows="3" readonly>${LINUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_linux" class="menu_button">复制安装 / 更新命令</button></article></div><ol class="npms-steps"><li>需要 Node.js 20+ 与 npm。</li><li>找不到酒馆时通过 <code>ST_DIR</code> 指定路径。</li><li>命令执行完成后，请自行重启 SillyTavern。</li></ol></section>
  <section class="npms-page" data-npms-page="tools" hidden><div class="npms-section-heading"><span>05</span><div><b>工具与记录</b><small>接口、播放器适配和后端回传。</small></div></div><details class="npms-detail-card"><summary><b>播放器接入接口</b><span>API</span></summary><div class="npms-detail-body"><div class="npms-api-list"><code>GET ${api}/?types=search&amp;name=歌名%20歌手</code><span>搜索</span><code>GET ${api}/?types=url&amp;id=歌曲ID</code><span>播放</span><code>GET ${api}/?types=lyric&amp;id=歌曲ID</code><span>歌词</span><code>GET ${api}/input/resolve?provider=qq|netease&amp;input=...</code><span>统一解析</span><code>GET ${api}/account/playlists?provider=netease|qq</code><span>账号歌单目录</span><code>GET ${api}/account/playlist/歌单ID?provider=...&amp;limit=300</code><span>按需载入，硬上限 500 首</span><code>GET ${api}/local/list</code><span>本地列表</span><code>GET ${api}/health</code><span>后端状态</span></div><button id="npms_copy_api" class="menu_button">复制接口基址</button></div></details><details class="npms-detail-card"><summary><b>适配现有酒馆助手播放器</b><span>ADAPTER</span></summary><div class="npms-detail-body"><p class="npms-help">只创建适配副本，永不覆盖原脚本。</p><button id="npms_scan_scripts" class="menu_button">扫描播放器脚本</button><div id="npms_script_candidates" class="npms-script-candidates"><span class="npms-muted">尚未扫描。</span></div></div></details><details class="npms-detail-card" open><summary><b>后端回传与操作记录</b><span>LOG</span></summary><div class="npms-detail-body"><div id="npms_feedback" class="npms-feedback"></div></div></details></section>
  </div></div></div>`;
 }
@@ -826,6 +927,16 @@ function bind() {
             const active = page.dataset.npmsPage === name;
             page.classList.toggle('is-active', active);
             page.hidden = !active;
+        });
+    }));
+    root.querySelectorAll('[data-manage-mode]').forEach(tab => tab.addEventListener('click', () => {
+        const mode = tab.dataset.manageMode;
+        root.querySelectorAll('[data-manage-mode]').forEach(item => item.classList.toggle('is-active', item === tab));
+        root.querySelectorAll('.npms-deploy-card').forEach(card => {
+            const area = card.querySelector('textarea');
+            const button = card.querySelector('.menu_button');
+            if (area) area.value = mode === 'remove' ? area.dataset.removeCommand : area.dataset.installCommand;
+            if (button) button.textContent = mode === 'remove' ? '复制删除后端命令' : '复制安装 / 更新命令';
         });
     }));
     root.querySelectorAll('[data-provider]').forEach(button => button.addEventListener('click', () => switchProvider(button.dataset.provider)));
@@ -848,10 +959,10 @@ function bind() {
     root.querySelector('#npms_rescan').addEventListener('click', rescan);
     root.querySelector('#npms_dir_inspect').addEventListener('click', inspectLocalDir);
     root.querySelector('#npms_dir_save').addEventListener('click', saveLocalDir);
-    root.querySelector('#npms_copy_install_termux').addEventListener('click', () => copyText(TERMUX_INSTALL_COMMAND, 'Termux 部署命令已复制'));
-    root.querySelector('#npms_copy_install_windows').addEventListener('click', () => copyText(WINDOWS_INSTALL_COMMAND, 'Windows 部署命令已复制'));
-    root.querySelector('#npms_copy_install_macos').addEventListener('click', () => copyText(MACOS_INSTALL_COMMAND, 'macOS 部署命令已复制'));
-    root.querySelector('#npms_copy_install_linux').addEventListener('click', () => copyText(LINUX_INSTALL_COMMAND, 'Linux 部署命令已复制'));
+    root.querySelector('#npms_copy_install_termux').addEventListener('click', () => copyText(root.querySelector('#npms_install_command_termux').value, 'Termux 后端命令已复制'));
+    root.querySelector('#npms_copy_install_windows').addEventListener('click', () => copyText(root.querySelector('#npms_install_command_windows').value, 'Windows 后端命令已复制'));
+    root.querySelector('#npms_copy_install_macos').addEventListener('click', () => copyText(root.querySelector('#npms_install_command_macos').value, 'macOS 后端命令已复制'));
+    root.querySelector('#npms_copy_install_linux').addEventListener('click', () => copyText(root.querySelector('#npms_install_command_linux').value, 'Linux 后端命令已复制'));
     root.querySelector('#npms_copy_api').addEventListener('click', () => copyText(API_BASE, '接口基址已复制'));
     root.querySelector('#npms_scan_scripts').addEventListener('click', scanPlayerScripts);
 }

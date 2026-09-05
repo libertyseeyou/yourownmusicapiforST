@@ -143,3 +143,19 @@
 .npms-panel select:focus { outline: 1px solid var(--npms-ink); outline-offset: 1px; }
 .npms-panel select:disabled { opacity: .55; }
 @container (max-width: 480px) { .npms-select-row { grid-template-columns: 1fr; } .npms-select-row .menu_button { width: 100%; } }
+.npms-lyric-window { position: relative; overflow: hidden; height: 74px; margin: -5px 0 10px; padding: 4px 7px; border-bottom: 1px solid var(--npms-line); color: var(--npms-muted); text-align: center; }
+.npms-lyric-stack { display: grid; grid-template-rows: 18px 34px 18px; align-items: center; height: 66px; }
+.npms-lyric-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Georgia, "Noto Serif SC", serif; transition: opacity .25s ease, transform .25s ease; }
+.npms-lyric-line span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.npms-lyric-line small { display: block; margin-top: 1px; overflow: hidden; color: var(--npms-muted); font-size: .66rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.npms-lyric-line.is-previous, .npms-lyric-line.is-next { opacity: .42; font-size: .68rem; }
+.npms-lyric-line.is-current { color: var(--npms-ink); font-size: .83rem; font-weight: 700; }
+.npms-lyric-stack.is-advancing { animation: npms-lyrics-rise .28s ease both; }
+@keyframes npms-lyrics-rise { from { opacity: .55; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+.npms-cookie-fold { margin-top: 12px; }
+.npms-cookie-fold .npms-detail-body { padding: 9px; }
+.npms-cookie-fold .npms-field-card { margin: 0; border: 0; background: transparent; }
+.npms-manage-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; border: 1px solid var(--npms-line); }
+.npms-manage-tab { min-height: 39px; border: 0; border-right: 1px solid var(--npms-line); border-radius: 0; color: var(--npms-ink); background: transparent; font-family: inherit; cursor: pointer; }
+.npms-manage-tab:last-child { border-right: 0; }
+.npms-manage-tab.is-active { background: var(--npms-active); box-shadow: inset 0 -2px 0 var(--npms-ink); font-weight: 700; }
