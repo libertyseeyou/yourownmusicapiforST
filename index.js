@@ -6,11 +6,19 @@ const API_BASE = `/api/plugins/${EXTENSION_ID}`;
 const DEFAULTS = {
     provider: 'netease',
     floatingLyricsEnabled: false,
-    floatingLyricsPosition: 'right-bottom',
+    floatingLyricsPosition: 'center-top',
     floatingLyricsFontColor: '#ffffff',
     floatingLyricsGlowColor: '#000000',
     floatingLyricsGlowStrength: 12,
     floatingLyricsFontSize: 18,
+    floatingLyricsFontFamily: 'global',
+    floatingLyricsCustomFont: '',
+    floatingLyricsFontUrl: '',
+    floatingLyricsFontUrlEnabled: false,
+    floatingLyricsX: null,
+    floatingLyricsY: null,
+    floatingLyricsScale: 1,
+    floatingPlayerTheme: 'dark',
 };
 const REQUEST_TIMEOUT_MS = 20000;
 const TERMUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-termux.sh | bash';
@@ -312,6 +320,7 @@ function renderMiniPlayer() {
     }
     if (ui.time && (!state.player.audio || !Number.isFinite(state.player.audio.duration))) ui.time.textContent = '0:00/0:00';
     if (ui.progress && (!state.player.audio || !Number.isFinite(state.player.audio.duration))) ui.progress.style.width = '0%';
+    updateFloatingPlayerControls();
 }
 
 function resetPlayerMarquee() {
@@ -330,24 +339,211 @@ function resetPlayerMarquee() {
 }
 
 function sanitizeHexColor(value, fallback) {
-    return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
+    const text = String(value || '').trim();
+    const match = text.match(/^#?([0-9a-f]{6})$/i);
+    return match ? `#${match[1].toLowerCase()}` : fallback;
 }
 
 function floatingLyricsConfig() {
     const config = settings();
-    const positions = new Set(['right-bottom', 'left-bottom', 'center-bottom', 'center-top']);
+    const positions = new Set(['center-top']);
+    const fontFamilies = new Set(['global', 'serif', 'sans-serif', 'monospace', 'custom', 'url']);
     return {
         enabled: Boolean(config.floatingLyricsEnabled),
-        position: positions.has(config.floatingLyricsPosition) ? config.floatingLyricsPosition : 'right-bottom',
+        position: positions.has(config.floatingLyricsPosition) ? config.floatingLyricsPosition : 'center-top',
         fontColor: sanitizeHexColor(config.floatingLyricsFontColor, '#ffffff'),
         glowColor: sanitizeHexColor(config.floatingLyricsGlowColor, '#000000'),
         glowStrength: Math.max(0, Math.min(30, Number(config.floatingLyricsGlowStrength) || 0)),
         fontSize: Math.max(12, Math.min(32, Number(config.floatingLyricsFontSize) || 18)),
+        fontFamily: fontFamilies.has(config.floatingLyricsFontFamily) ? config.floatingLyricsFontFamily : 'global',
+        fontUrl: /^https?:\/\//i.test(String(config.floatingLyricsFontUrl || '').trim()) ? String(config.floatingLyricsFontUrl).trim().slice(0, 2048) : '',
+        fontUrlEnabled: Boolean(config.floatingLyricsFontUrlEnabled),
+        customFont: String(config.floatingLyricsCustomFont || '').replace(/[^\p{L}\p{N} _,'"-]/gu, '').trim().slice(0, 100),
+        x: config.floatingLyricsX !== null && config.floatingLyricsX !== undefined && config.floatingLyricsX !== '' && Number.isFinite(Number(config.floatingLyricsX)) ? Number(config.floatingLyricsX) : null,
+        y: config.floatingLyricsY !== null && config.floatingLyricsY !== undefined && config.floatingLyricsY !== '' && Number.isFinite(Number(config.floatingLyricsY)) ? Number(config.floatingLyricsY) : null,
+        scale: Math.max(0.6, Math.min(2, Number(config.floatingLyricsScale) || 1)),
+        playerTheme: ['dark', 'light', 'glass', 'glass-light'].includes(config.floatingPlayerTheme) ? config.floatingPlayerTheme : 'dark',
     };
+}
+
+function floatingFontValue(config) {
+    if (config.fontFamily === 'serif') return 'serif';
+    if (config.fontFamily === 'sans-serif') return 'sans-serif';
+    if (config.fontFamily === 'monospace') return 'monospace';
+    if (config.fontFamily === 'url' && config.fontUrlEnabled && config.fontUrl) return 'NPMSUserFloatingFont';
+    if (config.fontFamily === 'custom' && config.customFont) return config.customFont;
+    return 'inherit';
+}
+
+let floatingFontLoadToken = 0;
+let floatingFontLoadedUrl = '';
+let floatingFontLoadingUrl = '';
+
+async function loadFloatingFont(url) {
+    if (!url || typeof FontFace === 'undefined') return false;
+    if (url === floatingFontLoadedUrl || url === floatingFontLoadingUrl) return true;
+    const token = ++floatingFontLoadToken;
+    floatingFontLoadingUrl = url;
+    try {
+        const face = new FontFace('NPMSUserFloatingFont', `url("${url.replace(/"/g, '%22')}")`);
+        await face.load();
+        if (token !== floatingFontLoadToken) return false;
+        document.fonts.add(face);
+        floatingFontLoadedUrl = url;
+        return true;
+    } catch (error) {
+        console.warn('[你自己的音乐源] floating font failed to load', error);
+        return false;
+    } finally {
+        if (floatingFontLoadingUrl === url) floatingFontLoadingUrl = '';
+    }
 }
 
 function removeFloatingLyrics() {
     document.querySelector('#npms_floating_lyrics')?.remove();
+}
+
+function clampFloatingPosition(root, x, y) {
+    const rect = root.getBoundingClientRect();
+    const maxX = Math.max(0, window.innerWidth - Math.max(80, rect.width));
+    const maxY = Math.max(0, window.innerHeight - Math.max(55, rect.height));
+    return { x: Math.max(0, Math.min(maxX, x)), y: Math.max(0, Math.min(maxY, y)) };
+}
+
+function saveFloatingGeometry(root) {
+    const rect = root.getBoundingClientRect();
+    const config = settings();
+    root.classList.add('is-free-position');
+    config.floatingLyricsX = Math.round(rect.left);
+    config.floatingLyricsY = Math.round(rect.top);
+    saveSettingsDebounced();
+}
+
+function renderFloatingPlaylist(root) {
+    const list = root.querySelector('.npms-floating-playlist');
+    const summary = root.querySelector('.npms-floating-list-summary');
+    if (!list || !summary) return;
+    const tracks = state.player.tracks;
+    summary.textContent = tracks.length ? `当前列表 · ${tracks.length} 首` : '当前列表为空';
+    const fragment = document.createDocumentFragment();
+    tracks.forEach((track, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `npms-floating-track${index === state.player.index ? ' is-current' : ''}`;
+        button.dataset.trackIndex = String(index);
+        const artist = Array.isArray(track.artist) ? track.artist.join(' / ') : track.artist || '';
+        button.textContent = `${index + 1}. ${track.name}${artist ? ` - ${artist}` : ''}`;
+        button.title = button.textContent;
+        button.addEventListener('click', event => { event.stopPropagation(); void playPlayerIndex(index, true); });
+        fragment.append(button);
+    });
+    list.replaceChildren(fragment);
+    root.dataset.currentTrackIndex = String(state.player.index);
+    list.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' });
+}
+
+function updateFloatingPlayerControls(root = document.querySelector('#npms_floating_lyrics')) {
+    if (!root) return;
+    const audio = state.player.audio;
+    const duration = Number.isFinite(audio?.duration) ? audio.duration : 0;
+    const current = audio?.currentTime || 0;
+    const progress = root.querySelector('.npms-floating-progress');
+    if (progress && !progress.matches(':active')) progress.value = String(duration ? current / duration * 1000 : 0);
+    const currentTime = root.querySelector('.npms-floating-time-current');
+    const totalTime = root.querySelector('.npms-floating-time-total');
+    if (currentTime) currentTime.textContent = formatPlayerTime(current);
+    if (totalTime) totalTime.textContent = formatPlayerTime(duration);
+    const play = root.querySelector('.npms-floating-play');
+    if (play) play.textContent = audio && !audio.paused ? 'Ⅱ' : '▶';
+    const mode = root.querySelector('.npms-floating-mode');
+    if (mode) mode.textContent = { list: '↝', one: '↻¹', shuffle: '⤨' }[state.player.mode] || '↝';
+    const previousIndex = Number(root.dataset.currentTrackIndex);
+    if (previousIndex !== state.player.index) {
+        if (Number.isInteger(previousIndex)) root.querySelector(`.npms-floating-track[data-track-index="${previousIndex}"]`)?.classList.remove('is-current');
+        const currentRow = root.querySelector(`.npms-floating-track[data-track-index="${state.player.index}"]`);
+        currentRow?.classList.add('is-current');
+        if (root.classList.contains('is-open')) currentRow?.scrollIntoView({ block: 'nearest' });
+        root.dataset.currentTrackIndex = String(state.player.index);
+    }
+}
+
+function bindFloatingPlayer(root) {
+    if (root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+    const lyrics = root.querySelector('.npms-floating-lyrics-display');
+    const controls = root.querySelector('.npms-floating-controls');
+    const playlistPanel = root.querySelector('.npms-floating-playlist-panel');
+    root.querySelector('.npms-floating-list-toggle').addEventListener('click', event => {
+        event.stopPropagation();
+        playlistPanel.hidden = !playlistPanel.hidden;
+        if (!playlistPanel.hidden) renderFloatingPlaylist(root);
+    });
+    let drag = null;
+    lyrics.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        const rect = root.getBoundingClientRect();
+        root.classList.remove('pos-center-top');
+        root.classList.add('is-free-position');
+        root.style.transformOrigin = 'top left';
+        root.style.left = `${rect.left}px`; root.style.top = `${rect.top}px`;
+        root.style.right = 'auto'; root.style.bottom = 'auto';
+        drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top, moved: false };
+        lyrics.setPointerCapture(event.pointerId);
+        root.classList.add('is-dragging');
+    });
+    lyrics.addEventListener('pointermove', event => {
+        if (!drag || drag.id !== event.pointerId) return;
+        const dx = event.clientX - drag.startX;
+        const dy = event.clientY - drag.startY;
+        if (Math.abs(dx) + Math.abs(dy) > 5) drag.moved = true;
+        const point = clampFloatingPosition(root, drag.left + dx, drag.top + dy);
+        root.style.left = `${point.x}px`; root.style.top = `${point.y}px`;
+        root.style.right = 'auto'; root.style.bottom = 'auto';
+    });
+    const finishDrag = event => {
+        if (!drag || drag.id !== event.pointerId) return;
+        const moved = drag.moved;
+        drag = null; root.classList.remove('is-dragging');
+        try { lyrics.releasePointerCapture(event.pointerId); } catch {}
+        saveFloatingGeometry(root);
+        if (!moved) {
+            root.classList.toggle('is-open');
+            controls.hidden = !root.classList.contains('is-open');
+            if (!controls.hidden) { playlistPanel.hidden = true; }
+        }
+    };
+    lyrics.addEventListener('pointerup', finishDrag);
+    lyrics.addEventListener('pointercancel', finishDrag);
+    root.querySelector('.npms-floating-prev').addEventListener('click', event => { event.stopPropagation(); void playPlayerOffset(-1, true); });
+    root.querySelector('.npms-floating-play').addEventListener('click', event => { event.stopPropagation(); void toggleMiniPlayer(); });
+    root.querySelector('.npms-floating-next').addEventListener('click', event => { event.stopPropagation(); void playPlayerOffset(1, true); });
+    root.querySelector('.npms-floating-mode').addEventListener('click', event => { event.stopPropagation(); cyclePlayerMode(); updateFloatingPlayerControls(root); });
+    root.querySelector('.npms-floating-progress').addEventListener('input', event => {
+        event.stopPropagation(); const audio = state.player.audio;
+        if (audio && Number.isFinite(audio.duration)) audio.currentTime = Number(event.target.value) / 1000 * audio.duration;
+        updatePlayerProgress(); updateFloatingPlayerControls(root); renderCurrentLyric(true);
+    });
+    const resize = root.querySelector('.npms-floating-resize');
+    let resizing = null;
+    resize.addEventListener('pointerdown', event => {
+        event.stopPropagation(); event.preventDefault();
+        resizing = { id: event.pointerId, startX: event.clientX, startY: event.clientY, scale: floatingLyricsConfig().scale };
+        resize.setPointerCapture(event.pointerId); root.classList.add('is-resizing');
+    });
+    resize.addEventListener('pointermove', event => {
+        if (!resizing || resizing.id !== event.pointerId) return;
+        const delta = ((event.clientX - resizing.startX) + (event.clientY - resizing.startY)) / 360;
+        const scale = Math.max(0.6, Math.min(2, resizing.scale + delta));
+        root.style.setProperty('--npms-float-scale', String(scale));
+        settings().floatingLyricsScale = Number(scale.toFixed(2));
+    });
+    const finishResize = event => {
+        if (!resizing || resizing.id !== event.pointerId) return;
+        resizing = null; root.classList.remove('is-resizing'); saveSettingsDebounced(); saveFloatingGeometry(root);
+        try { resize.releasePointerCapture(event.pointerId); } catch {}
+    };
+    resize.addEventListener('pointerup', finishResize);
+    resize.addEventListener('pointercancel', finishResize);
 }
 
 function ensureFloatingLyrics() {
@@ -357,15 +553,39 @@ function ensureFloatingLyrics() {
     if (!root) {
         root = document.createElement('div');
         root.id = 'npms_floating_lyrics';
-        root.className = 'npms-floating-lyrics';
-        root.setAttribute('aria-hidden', 'true');
+        root.className = 'npms-floating-player';
+        root.innerHTML = `<div class="npms-floating-lyrics-display"><div class="npms-floating-lines"></div></div><div class="npms-floating-controls" hidden><div class="npms-floating-progress-row"><span class="npms-floating-time-current">0:00</span><input class="npms-floating-progress" type="range" min="0" max="1000" value="0" aria-label="播放进度"><span class="npms-floating-time-total">0:00</span></div><div class="npms-floating-control-row"><button type="button" class="npms-floating-mode" title="播放顺序" aria-label="播放顺序">↝</button><button type="button" class="npms-floating-prev" title="上一首" aria-label="上一首">◀◀</button><button type="button" class="npms-floating-play" title="播放/暂停" aria-label="播放/暂停">▶</button><button type="button" class="npms-floating-next" title="下一首" aria-label="下一首">▶▶</button><button type="button" class="npms-floating-list-toggle" title="歌曲列表" aria-label="歌曲列表">☰</button></div><div class="npms-floating-playlist-panel" hidden><div class="npms-floating-list-summary">当前列表为空</div><div class="npms-floating-playlist"></div></div></div><button type="button" class="npms-floating-resize" title="" aria-label="调整大小"></button>`;
         document.body.append(root);
+        bindFloatingPlayer(root);
     }
-    root.className = `npms-floating-lyrics pos-${config.position}`;
     root.style.setProperty('--npms-float-color', config.fontColor);
     root.style.setProperty('--npms-float-glow-color', config.glowColor);
     root.style.setProperty('--npms-float-glow', `${config.glowStrength}px`);
+    root.style.setProperty('--npms-float-shadow', config.glowStrength > 0 ? `0 0 1px ${config.glowColor}` : 'none');
+    const lyricLines = root.querySelector('.npms-floating-lines');
+    if (lyricLines) lyricLines.style.filter = config.glowStrength > 0
+        ? `drop-shadow(0 0 3px ${config.glowColor}) drop-shadow(0 0 ${config.glowStrength}px ${config.glowColor})`
+        : 'none';
     root.style.setProperty('--npms-float-size', `${config.fontSize}px`);
+    root.classList.toggle('theme-light', config.playerTheme === 'light');
+    root.classList.toggle('theme-glass', config.playerTheme === 'glass');
+    root.classList.toggle('theme-glass-light', config.playerTheme === 'glass-light');
+    root.classList.toggle('theme-dark', config.playerTheme === 'dark');
+    if (config.fontFamily === 'global') root.style.removeProperty('--npms-float-font');
+    else root.style.setProperty('--npms-float-font', floatingFontValue(config));
+    if (config.fontUrlEnabled && config.fontUrl) void loadFloatingFont(config.fontUrl);
+    root.style.setProperty('--npms-float-scale', String(config.scale));
+    const positionClasses = ['pos-center-top'];
+    root.classList.remove(...positionClasses);
+    if (config.x !== null && config.y !== null) {
+        root.classList.add('is-free-position');
+        const point = clampFloatingPosition(root, config.x, config.y);
+        root.style.left = `${point.x}px`; root.style.top = `${point.y}px`; root.style.right = 'auto'; root.style.bottom = 'auto';
+    } else {
+        root.classList.remove('is-free-position');
+        root.classList.add(`pos-${config.position}`);
+        root.style.removeProperty('left'); root.style.removeProperty('top'); root.style.removeProperty('right'); root.style.removeProperty('bottom');
+    }
     return root;
 }
 
@@ -373,68 +593,67 @@ function renderFloatingLyrics(index) {
     const root = ensureFloatingLyrics();
     if (!root) return;
     const track = currentPlayerTrack();
+    if (!track) { root.hidden = true; return; }
     const lyrics = state.player.lyrics;
-    if (!track || track.source === 'local' || index < 0 || !lyrics[index]) {
-        root.hidden = true;
-        root.replaceChildren();
-        return;
-    }
+    const lines = root.querySelector('.npms-floating-lines');
     const makeLine = (line, className, includeTranslation = false) => {
-        const node = document.createElement('div');
-        node.className = `npms-floating-lyric-line ${className}`;
-        const primary = document.createElement('span');
-        primary.textContent = line?.text || '';
-        node.append(primary);
-        if (includeTranslation && line?.translation) {
-            const translation = document.createElement('small');
-            translation.textContent = line.translation;
-            node.append(translation);
-        }
+        const node = document.createElement('div'); node.className = `npms-floating-lyric-line ${className}`;
+        const primary = document.createElement('span'); primary.textContent = line?.text || ''; node.append(primary);
+        if (includeTranslation && line?.translation) { const translation = document.createElement('small'); translation.textContent = line.translation; node.append(translation); }
         return node;
     };
     root.hidden = false;
-    root.replaceChildren(
-        makeLine(lyrics[index - 1], 'is-previous'),
-        makeLine(lyrics[index], 'is-current', true),
-        makeLine(lyrics[index + 1], 'is-next'),
-    );
-    root.classList.remove('is-advancing');
-    void root.offsetWidth;
-    root.classList.add('is-advancing');
+    if (track.source === 'local' || index < 0 || !lyrics[index]) {
+        lines.replaceChildren(makeLine({ text: '𝖘𝖔𝖒𝖊𝖙𝖍𝖎𝖓𝖌 𝖋𝖔𝖗 𝖓𝖔𝖙𝖍𝖎𝖓𝖌' }, 'is-current'));
+    } else {
+        lines.replaceChildren(makeLine(lyrics[index - 1], 'is-previous'), makeLine(lyrics[index], 'is-current', true), makeLine(lyrics[index + 1], 'is-next'));
+    }
+    lines.classList.remove('is-advancing'); void lines.offsetWidth; lines.classList.add('is-advancing');
+    updateFloatingPlayerControls(root);
 }
 
 function syncFloatingLyricsControls(root = document) {
     const config = floatingLyricsConfig();
-    const enabled = root.querySelector('#npms_floating_lyrics_enabled');
-    const position = root.querySelector('#npms_floating_lyrics_position');
-    const fontColor = root.querySelector('#npms_floating_lyrics_font_color');
-    const glowColor = root.querySelector('#npms_floating_lyrics_glow_color');
-    const glow = root.querySelector('#npms_floating_lyrics_glow');
-    const fontSize = root.querySelector('#npms_floating_lyrics_font_size');
-    if (enabled) enabled.checked = config.enabled;
-    if (position) position.value = config.position;
-    if (fontColor) fontColor.value = config.fontColor;
-    if (glowColor) glowColor.value = config.glowColor;
-    if (glow) glow.value = String(config.glowStrength);
-    if (fontSize) fontSize.value = String(config.fontSize);
+    const values = {
+        '#npms_floating_lyrics_enabled': ['checked', config.enabled],
+        '#npms_floating_lyrics_font_color': ['value', config.fontColor],
+        '#npms_floating_lyrics_font_color_text': ['value', config.fontColor.slice(1)],
+        '#npms_floating_lyrics_glow_color': ['value', config.glowColor],
+        '#npms_floating_lyrics_glow_color_text': ['value', config.glowColor.slice(1)],
+        '#npms_floating_lyrics_glow': ['value', String(config.glowStrength)],
+        '#npms_floating_lyrics_font_size': ['value', String(config.fontSize)],
+        '#npms_floating_lyrics_font_family': ['value', config.fontFamily],
+        '#npms_floating_lyrics_custom_font': ['value', config.customFont],
+        '#npms_floating_lyrics_font_url': ['value', config.fontUrl],
+        '#npms_floating_lyrics_font_url_enabled': ['checked', config.fontUrlEnabled],
+        '#npms_floating_player_theme': ['value', config.playerTheme],
+    };
+    for (const [selector, [property, value]] of Object.entries(values)) { const node = root.querySelector(selector); if (node) node[property] = value; }
     root.querySelector('#npms_floating_lyrics_font_color_value')?.replaceChildren(document.createTextNode(config.fontColor));
     root.querySelector('#npms_floating_lyrics_glow_color_value')?.replaceChildren(document.createTextNode(config.glowColor));
     root.querySelector('#npms_floating_lyrics_glow_value')?.replaceChildren(document.createTextNode(`${config.glowStrength}px`));
     root.querySelector('#npms_floating_lyrics_font_size_value')?.replaceChildren(document.createTextNode(`${config.fontSize}px`));
-    ensureFloatingLyrics();
-    renderFloatingLyrics(state.player.lyricIndex);
+    ensureFloatingLyrics(); renderFloatingLyrics(state.player.lyricIndex);
 }
 
 function saveFloatingLyricsControls(root) {
     const config = settings();
     config.floatingLyricsEnabled = Boolean(root.querySelector('#npms_floating_lyrics_enabled')?.checked);
-    config.floatingLyricsPosition = root.querySelector('#npms_floating_lyrics_position')?.value || 'right-bottom';
-    config.floatingLyricsFontColor = sanitizeHexColor(root.querySelector('#npms_floating_lyrics_font_color')?.value, '#ffffff');
-    config.floatingLyricsGlowColor = sanitizeHexColor(root.querySelector('#npms_floating_lyrics_glow_color')?.value, '#000000');
+    config.floatingLyricsPosition = 'center-top';
+    config.floatingLyricsFontColor = sanitizeHexColor(root.querySelector('#npms_floating_lyrics_font_color_text')?.value, '#ffffff');
+    config.floatingLyricsGlowColor = sanitizeHexColor(root.querySelector('#npms_floating_lyrics_glow_color_text')?.value, '#000000');
     config.floatingLyricsGlowStrength = Number(root.querySelector('#npms_floating_lyrics_glow')?.value) || 0;
     config.floatingLyricsFontSize = Number(root.querySelector('#npms_floating_lyrics_font_size')?.value) || 18;
-    saveSettingsDebounced();
-    syncFloatingLyricsControls(root);
+    config.floatingLyricsFontFamily = root.querySelector('#npms_floating_lyrics_font_family')?.value || 'global';
+    const selectedTheme = root.querySelector('#npms_floating_player_theme')?.value;
+    config.floatingPlayerTheme = ['dark', 'light', 'glass', 'glass-light'].includes(selectedTheme) ? selectedTheme : 'dark';
+    const nextFontUrl = String(root.querySelector('#npms_floating_lyrics_font_url')?.value || '').trim().slice(0, 2048);
+    if (nextFontUrl !== config.floatingLyricsFontUrl) floatingFontLoadedUrl = '';
+    config.floatingLyricsFontUrl = nextFontUrl;
+    config.floatingLyricsFontUrlEnabled = Boolean(root.querySelector('#npms_floating_lyrics_font_url_enabled')?.checked);
+    if (config.floatingLyricsFontUrlEnabled && /^https?:\/\//i.test(config.floatingLyricsFontUrl)) void loadFloatingFont(config.floatingLyricsFontUrl);
+    config.floatingLyricsCustomFont = String(root.querySelector('#npms_floating_lyrics_custom_font')?.value || '').replace(/[^\p{L}\p{N} _,'"-]/gu, '').slice(0, 100);
+    saveSettingsDebounced(); syncFloatingLyricsControls(root);
 }
 
 function parseLrc(text) {
@@ -554,6 +773,7 @@ function updatePlayerProgress() {
     const duration = Number.isFinite(audio?.duration) ? audio.duration : 0;
     if (ui.time) ui.time.textContent = `${formatPlayerTime(current)}/${formatPlayerTime(duration)}`;
     if (ui.progress) ui.progress.style.width = `${duration ? Math.min(100, current / duration * 100) : 0}%`;
+    updateFloatingPlayerControls();
 }
 
 function seekMiniPlayer(event) {
@@ -675,6 +895,8 @@ function setPlayerTracks(tracks, { name = '', cover = '', feedbackLabel = '播�
     state.player.playlistName = name; state.player.cover = cover;
     if (!preservePlayback) { state.player.lyrics = []; state.player.lyricIndex = -1; }
     renderMiniPlayer(); renderCurrentLyric(true);
+    const floating = document.querySelector('#npms_floating_lyrics');
+    if (floating && floating.classList.contains('is-open')) renderFloatingPlaylist(floating);
     appendFeedback(feedbackLabel, { name, trackCount: usable.length }, true);
     return usable.length;
 }
@@ -1020,7 +1242,7 @@ function panelHtml() {
  <div class="inline-drawer-toggle inline-drawer-header"><b>你自己的音乐源</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
  <div class="inline-drawer-content npms-paper"><nav class="npms-tabs" role="tablist"><button class="npms-tab is-active" data-npms-tab="home">主页</button><button class="npms-tab" data-npms-tab="player">播放器</button><button class="npms-tab" data-npms-tab="local">本地音乐</button><button class="npms-tab" data-npms-tab="deploy">部署</button><button class="npms-tab" data-npms-tab="tools">工具</button></nav>
  <section class="npms-page is-active" data-npms-page="home"><div class="npms-section-heading"><span>01</span><div><b>连接与账号</b><small>选择平台，并连接只属于你的曲库。</small></div></div><div id="npms_status" class="npms-status">等待检查后端</div><div class="npms-provider-switch"><button type="button" data-provider="netease" class="npms-provider-button"><span>网易云音乐</span><small>NETEASE</small></button><button type="button" data-provider="qq" class="npms-provider-button"><span>QQ 音乐</span><small>QQ MUSIC</small></button></div><div class="npms-actions npms-primary-actions"><button id="npms_refresh" class="menu_button">↻ 刷新状态</button><button id="npms_qr_start" class="menu_button">＋ 扫码登录</button><button id="npms_logout" class="menu_button">清除登录</button></div><div id="npms_qr_box" class="npms-qr" hidden><img id="npms_qr_image" alt="登录二维码"><button id="npms_qr_cancel" class="menu_button">取消扫码</button></div><details class="npms-detail-card npms-cookie-fold"><summary><b>Cookie 登录</b><span>可选</span></summary><div class="npms-detail-body"><div class="npms-field-card"><label id="npms_cookie_label" for="npms_cookie">平台 Cookie <small>仅提交到本机后端</small></label><textarea id="npms_cookie" rows="3" placeholder="在这里粘贴平台 Cookie"></textarea><button id="npms_cookie_save" class="menu_button">保存并验证 Cookie</button></div></div></details><p class="npms-privacy-note">账号凭据只保存在 SillyTavern 后端，不写入聊天、角色卡或前端设置。</p></section>
- <section class="npms-page" data-npms-page="player" hidden><div class="npms-section-heading"><span>02</span><div><b>播放器</b><small>搜索歌曲、解析分享链接，或播放本地曲目。</small></div></div><div class="npms-field-card npms-account-playlists"><label for="npms_account_playlist">账号歌单 <small>登录后自动读取目录；每个歌单最多载入 500 首</small></label><div class="npms-select-row"><select id="npms_account_playlist" disabled><option value="">登录后自动显示账号歌单目录</option></select><select id="npms_account_playlist_limit" aria-label="歌单载入数量"><option value="300" selected>前 300 首（推荐）</option><option value="500">前 500 首</option></select><button id="npms_account_playlist_load" class="menu_button" disabled>载入所选歌单</button></div></div><details class="npms-detail-card npms-floating-lyrics-settings"><summary><b>主页面悬浮歌词</b><span>默认关闭</span></summary><div class="npms-detail-body"><label class="npms-check-row"><input id="npms_floating_lyrics_enabled" type="checkbox"><span>在酒馆主页面显示同步歌词</span></label><div class="npms-floating-options"><label>位置<select id="npms_floating_lyrics_position"><option value="right-bottom">右下</option><option value="left-bottom">左下</option><option value="center-bottom">底部居中</option><option value="center-top">顶部居中</option></select></label><label>字体颜色 <output id="npms_floating_lyrics_font_color_value">#ffffff</output><input id="npms_floating_lyrics_font_color" type="color" value="#ffffff"></label><label>晕染颜色 <output id="npms_floating_lyrics_glow_color_value">#000000</output><input id="npms_floating_lyrics_glow_color" type="color" value="#000000"></label><label>晕染强度 <output id="npms_floating_lyrics_glow_value">12px</output><input id="npms_floating_lyrics_glow" type="range" min="0" max="30" step="1" value="12"></label><label>字体大小 <output id="npms_floating_lyrics_font_size_value">18px</output><input id="npms_floating_lyrics_font_size" type="range" min="12" max="32" step="1" value="18"></label></div><small class="npms-muted">只在当前网络歌曲有同步歌词时显示；本地音乐无歌词时自动隐藏。</small></div></details><div class="npms-mini-player"><div class="npms-compact-main"><div id="npms_player_title_wrap" class="npms-player-title-wrap"><span id="npms_player_ticker" class="npms-player-ticker">Loading...</span></div><div id="npms_player_time" class="npms-player-time">0:00/0:00</div><div class="npms-player-controls"><button id="npms_player_prev" class="npms-player-key">&lt;&lt;</button><button id="npms_player_play" class="npms-player-key">&gt;</button><button id="npms_player_next" class="npms-player-key">&gt;&gt;</button><button id="npms_player_mode" class="npms-player-key">SEQ</button></div><label class="npms-volume"><b>VOL</b><input id="npms_player_volume" type="range" min="0" max="100" value="60"></label></div><div id="npms_player_progress_track" class="npms-progress-track"><div id="npms_player_progress" class="npms-progress-bar"></div></div><div class="npms-lyric-window"><div id="npms_player_lyric" class="npms-lyric-stack"><div class="npms-lyric-line is-current"><span>歌词将在播放时显示</span></div></div></div><div class="npms-playlist-loader"><input id="npms_playlist_input" type="text" placeholder="歌曲 歌手 / 单曲或歌单分享链接"><button id="npms_playlist_load" class="menu_button">搜索 / 解析</button><button id="npms_local_load" class="menu_button">本地音乐</button></div><div class="npms-player-foot"><span id="npms_player_count">0 / 0</span><span>SEQ · ONE · RND</span></div></div></section>
+ <section class="npms-page" data-npms-page="player" hidden><div class="npms-section-heading"><span>02</span><div><b>播放器</b><small>搜索歌曲、解析分享链接，或播放本地曲目。</small></div></div><div class="npms-field-card npms-account-playlists"><label for="npms_account_playlist">账号歌单 <small>登录后自动读取目录；每个歌单最多载入 500 首</small></label><div class="npms-select-row"><select id="npms_account_playlist" disabled><option value="">登录后自动显示账号歌单目录</option></select><select id="npms_account_playlist_limit" aria-label="歌单载入数量"><option value="300" selected>前 300 首（推荐）</option><option value="500">前 500 首</option></select><button id="npms_account_playlist_load" class="menu_button" disabled>载入所选歌单</button></div></div><details class="npms-detail-card npms-floating-lyrics-settings"><summary><b>主页面悬浮歌词</b><span>默认关闭</span></summary><div class="npms-detail-body"><label class="npms-check-row"><input id="npms_floating_lyrics_enabled" type="checkbox"><span>在酒馆主页面显示同步歌词</span></label><button type="button" id="npms_floating_lyrics_reset_position" class="menu_button npms-position-reset">重置到顶部居中</button><div class="npms-floating-options"><label>字体颜色<div class="npms-color-control"><input id="npms_floating_lyrics_font_color_text" type="text" inputmode="text" maxlength="7" value="ffffff" aria-label="字体颜色六位编码"><input id="npms_floating_lyrics_font_color" type="color" value="#ffffff" aria-label="选择字体颜色"></div></label><label>晕染颜色<div class="npms-color-control"><input id="npms_floating_lyrics_glow_color_text" type="text" inputmode="text" maxlength="7" value="000000" aria-label="晕染颜色六位编码"><input id="npms_floating_lyrics_glow_color" type="color" value="#000000" aria-label="选择晕染颜色"></div></label><label>晕染强度 <output id="npms_floating_lyrics_glow_value">12px</output><input id="npms_floating_lyrics_glow" type="range" min="0" max="30" step="1" value="12"></label><label>字体大小 <output id="npms_floating_lyrics_font_size_value">18px</output><input id="npms_floating_lyrics_font_size" type="range" min="12" max="32" step="1" value="18"></label><label>播放栏配色<select id="npms_floating_player_theme"><option value="dark">灰黑底浅色字</option><option value="light">灰白底深色字</option><option value="glass">灰黑底毛玻璃</option><option value="glass-light">浅色底毛玻璃</option></select></label><label>字体<select id="npms_floating_lyrics_font_family"><option value="global">跟随酒馆全局</option><option value="serif">衬线</option><option value="sans-serif">无衬线</option><option value="monospace">等宽</option><option value="custom">本地字体</option><option value="url">网络字体</option></select></label><label>本地字体<input id="npms_floating_lyrics_custom_font" type="text"></label><label class="npms-font-url-field">网络字体地址<input id="npms_floating_lyrics_font_url" type="url" inputmode="url"></label><label class="npms-check-row npms-font-url-toggle"><input id="npms_floating_lyrics_font_url_enabled" type="checkbox"><span>启用网络字体</span></label></div></div></details><div class="npms-mini-player"><div class="npms-compact-main"><div id="npms_player_title_wrap" class="npms-player-title-wrap"><span id="npms_player_ticker" class="npms-player-ticker">Loading...</span></div><div id="npms_player_time" class="npms-player-time">0:00/0:00</div><div class="npms-player-controls"><button id="npms_player_prev" class="npms-player-key">&lt;&lt;</button><button id="npms_player_play" class="npms-player-key">&gt;</button><button id="npms_player_next" class="npms-player-key">&gt;&gt;</button><button id="npms_player_mode" class="npms-player-key">SEQ</button></div><label class="npms-volume"><b>VOL</b><input id="npms_player_volume" type="range" min="0" max="100" value="60"></label></div><div id="npms_player_progress_track" class="npms-progress-track"><div id="npms_player_progress" class="npms-progress-bar"></div></div><div class="npms-lyric-window"><div id="npms_player_lyric" class="npms-lyric-stack"><div class="npms-lyric-line is-current"><span>歌词将在播放时显示</span></div></div></div><div class="npms-playlist-loader"><input id="npms_playlist_input" type="text" placeholder="歌曲 歌手 / 单曲或歌单分享链接"><button id="npms_playlist_load" class="menu_button">搜索 / 解析</button><button id="npms_local_load" class="menu_button">本地音乐</button></div><div class="npms-player-foot"><span id="npms_player_count">0 / 0</span><span>SEQ · ONE · RND</span></div></div></section>
  <section class="npms-page" data-npms-page="local" hidden><div class="npms-section-heading"><span>03</span><div><b>本地音乐</b><small>连接运行酒馆的设备或服务器中的音乐目录。</small></div></div><div class="npms-field-card"><label for="npms_local_dir">音乐目录绝对路径</label><input id="npms_local_dir" type="text" placeholder="C:\\Users\\你\\Music、/Users/你/Music 或 /home/你/Music"><div class="npms-examples">Windows：<code>C:\Users\你\Music</code><br>macOS：<code>/Users/你/Music</code><br>Linux：<code>/home/你/Music</code><br>Termux：<code>/data/data/com.termux/files/home/storage/music</code></div><div class="npms-actions"><button id="npms_dir_inspect" class="menu_button">检测目录</button><button id="npms_dir_save" class="menu_button">保存并连接</button><button id="npms_rescan" class="menu_button">重新扫描</button></div></div><div class="npms-format-strip"><b>支持格式</b><span>MP3</span><span>FLAC</span><span>M4A</span><span>WAV</span><span>OGG</span><span>AAC</span><span>WEBM</span><span>OPUS</span></div><p class="npms-privacy-note">Docker 请填写容器内可见路径，并使用持久化卷。</p></section>
  <section class="npms-page" data-npms-page="deploy" hidden><div class="npms-section-heading"><span>04</span><div><b>后端管理</b><small>选择操作与 SillyTavern 实际运行的平台。</small></div></div><div class="npms-manage-tabs"><button class="npms-manage-tab is-active" data-manage-mode="install">安装 / 更新后端</button><button class="npms-manage-tab" data-manage-mode="remove">删除后端</button></div><div class="npms-deploy-grid">
 <article class="npms-deploy-card"><header><b>Android</b><small>TERMUX</small></header><textarea id="npms_install_command_termux" data-install-command="${TERMUX_INSTALL_COMMAND}" data-remove-command="${TERMUX_REMOVE_BACKEND_COMMAND}" rows="3" readonly>${TERMUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_termux" class="menu_button">复制安装 / 更新命令</button></article>
@@ -1062,8 +1284,24 @@ function bind() {
     root.querySelector('#npms_qr_cancel').addEventListener('click', () => { stopQrPolling(); root.querySelector('#npms_qr_box').hidden = true; setStatus('已取消扫码'); });
     root.querySelector('#npms_cookie_save').addEventListener('click', saveCookie);
     root.querySelector('#npms_account_playlist_load').addEventListener('click', loadSelectedAccountPlaylist);
-    const floatingControls = ['#npms_floating_lyrics_enabled', '#npms_floating_lyrics_position', '#npms_floating_lyrics_font_color', '#npms_floating_lyrics_glow_color', '#npms_floating_lyrics_glow', '#npms_floating_lyrics_font_size'];
+    const floatingControls = ['#npms_floating_lyrics_enabled', '#npms_floating_lyrics_glow', '#npms_floating_lyrics_font_size', '#npms_floating_player_theme', '#npms_floating_lyrics_font_family', '#npms_floating_lyrics_custom_font', '#npms_floating_lyrics_font_url', '#npms_floating_lyrics_font_url_enabled'];
     floatingControls.forEach(selector => root.querySelector(selector)?.addEventListener('input', () => saveFloatingLyricsControls(root)));
+    const bindColor = (textSelector, pickerSelector, fallback) => {
+        const text = root.querySelector(textSelector); const picker = root.querySelector(pickerSelector);
+        text?.addEventListener('input', () => {
+            const color = sanitizeHexColor(text.value, '');
+            text.classList.toggle('is-invalid', !color);
+            if (color && picker) { picker.value = color; saveFloatingLyricsControls(root); }
+        });
+        picker?.addEventListener('input', () => { if (text) text.value = picker.value.slice(1); saveFloatingLyricsControls(root); });
+        text?.addEventListener('blur', () => { const color = sanitizeHexColor(text.value, fallback); text.value = color.slice(1); text.classList.remove('is-invalid'); if (picker) picker.value = color; saveFloatingLyricsControls(root); });
+    };
+    bindColor('#npms_floating_lyrics_font_color_text', '#npms_floating_lyrics_font_color', '#ffffff');
+    bindColor('#npms_floating_lyrics_glow_color_text', '#npms_floating_lyrics_glow_color', '#000000');
+    root.querySelector('#npms_floating_lyrics_reset_position')?.addEventListener('click', () => {
+        settings().floatingLyricsX = null; settings().floatingLyricsY = null; settings().floatingLyricsPosition = 'center-top'; saveSettingsDebounced();
+        document.querySelector('#npms_floating_lyrics')?.remove(); renderFloatingLyrics(state.player.lyricIndex);
+    });
     syncFloatingLyricsControls(root);
     root.querySelector('#npms_playlist_load').addEventListener('click', resolvePlayerInput);
     root.querySelector('#npms_local_load').addEventListener('click', () => loadLocalPlayerTracks());
