@@ -19,6 +19,8 @@ const DEFAULTS = {
     floatingLyricsY: null,
     floatingLyricsScale: 1,
     floatingPlayerTheme: 'dark',
+    floatingPlayerStyleMode: 'preset',
+    floatingPlayerCustomCss: '',
 };
 const REQUEST_TIMEOUT_MS = 20000;
 const TERMUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-termux.sh | bash';
@@ -57,7 +59,10 @@ function settings() {
     for (const [key, value] of Object.entries(DEFAULTS)) {
         if (extension_settings[EXTENSION_ID][key] === undefined) extension_settings[EXTENSION_ID][key] = value;
     }
-    return extension_settings[EXTENSION_ID];
+    const config = extension_settings[EXTENSION_ID];
+    if (config.floatingPlayerStyleMode === 'preset' && ['inherit', 'preset', 'custom'].includes(config.floatingLyricsStyleMode)) config.floatingPlayerStyleMode = config.floatingLyricsStyleMode;
+    if (!config.floatingPlayerCustomCss && typeof config.floatingLyricsCustomCss === 'string') config.floatingPlayerCustomCss = config.floatingLyricsCustomCss;
+    return config;
 }
 
 function compactPayload(value) {
@@ -362,7 +367,9 @@ function floatingLyricsConfig() {
         x: config.floatingLyricsX !== null && config.floatingLyricsX !== undefined && config.floatingLyricsX !== '' && Number.isFinite(Number(config.floatingLyricsX)) ? Number(config.floatingLyricsX) : null,
         y: config.floatingLyricsY !== null && config.floatingLyricsY !== undefined && config.floatingLyricsY !== '' && Number.isFinite(Number(config.floatingLyricsY)) ? Number(config.floatingLyricsY) : null,
         scale: Math.max(0.6, Math.min(2, Number(config.floatingLyricsScale) || 1)),
-        playerTheme: ['dark', 'light', 'glass', 'glass-light'].includes(config.floatingPlayerTheme) ? config.floatingPlayerTheme : 'dark',
+        playerTheme: ['dark', 'light', 'glass', 'glass-light', 'inherit', 'custom'].includes(config.floatingPlayerTheme) ? config.floatingPlayerTheme : 'dark',
+        playerStyleMode: config.floatingPlayerTheme === 'inherit' ? 'inherit' : config.floatingPlayerTheme === 'custom' ? 'custom' : (['inherit', 'preset', 'custom'].includes(config.floatingPlayerStyleMode) ? config.floatingPlayerStyleMode : 'preset'),
+        playerCustomCss: String(config.floatingPlayerCustomCss || '').slice(0, 12000),
     };
 }
 
@@ -397,6 +404,145 @@ async function loadFloatingFont(url) {
     } finally {
         if (floatingFontLoadingUrl === url) floatingFontLoadingUrl = '';
     }
+}
+
+function scopeFloatingCss(value) {
+    const source = String(value || '').replace(/@import[^;]+;?/gi, '').replace(/url\s*\([^)]*\)/gi, 'none').replace(/expression\s*\([^)]*\)/gi, '');
+    return source.replace(/([^{}]+)\{/g, (whole, selector) => {
+        const clean = selector.trim();
+        if (!clean || clean.startsWith('@') || /^(from|to|[0-9]+%)$/i.test(clean)) return whole;
+        return clean.split(',').map(item => `#npms_floating_lyrics .npms-floating-controls ${item.trim()}, #npms_floating_lyrics .npms-floating-playlist-panel ${item.trim()}`).join(', ') + ' {';
+    });
+}
+
+function applyFloatingStyleCss() {
+    let style = document.querySelector('#npms_floating_lyrics_custom_style');
+    if (!style) { style = document.createElement('style'); style.id = 'npms_floating_lyrics_custom_style'; document.head.append(style); }
+    const config = floatingLyricsConfig();
+    style.textContent = config.playerStyleMode === 'custom' ? scopeFloatingCss(config.playerCustomCss) : '';
+}
+
+function readThemeStyle(element) {
+    if (!element) return null;
+    const style = getComputedStyle(element);
+    return {
+        color: style.color,
+        backgroundColor: style.backgroundColor,
+        backgroundImage: style.backgroundImage,
+        border: style.border,
+        borderRadius: style.borderRadius,
+        boxShadow: style.boxShadow,
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+    };
+}
+
+function findThemeSample(selectors) {
+    for (const selector of selectors) {
+        const node = document.querySelector(selector);
+        if (node && node.getClientRects().length) return node;
+    }
+    return selectors.map(selector => document.querySelector(selector)).find(Boolean) || null;
+}
+
+function applyInheritedPlayerTheme(root) {
+    if (floatingLyricsConfig().playerTheme !== 'inherit') return;
+    const panelNode = findThemeSample(['#send_form', '#chat', '#top-bar', 'body']);
+    const buttonNode = findThemeSample(['#send_but', '#extensionsMenuButton', '#options_button', 'button.menu_button', 'button']);
+    const inputNode = findThemeSample(['#send_textarea', '#send_form textarea', 'textarea', 'input[type="text"]']);
+    const panel = readThemeStyle(panelNode) || {};
+    const button = readThemeStyle(buttonNode) || {};
+    const input = readThemeStyle(inputNode) || {};
+    const rootStyle = getComputedStyle(document.documentElement);
+    const bodyStyle = getComputedStyle(document.body);
+    const cssVar = name => rootStyle.getPropertyValue(name).trim() || bodyStyle.getPropertyValue(name).trim();
+    const panelBackground = panel.backgroundColor && panel.backgroundColor !== 'rgba(0, 0, 0, 0)' ? panel.backgroundColor : cssVar('--SmartThemeBlurTintColor') || 'rgba(128,128,128,.22)';
+    const buttonBackground = button.backgroundColor && button.backgroundColor !== 'rgba(0, 0, 0, 0)' ? button.backgroundColor : cssVar('--SmartThemeQuoteColor') || cssVar('--SmartThemeEmColor') || 'rgba(128,128,128,.28)';
+    const color = button.color || panel.color || cssVar('--SmartThemeBodyColor') || bodyStyle.color || '#f0f0f0';
+    const border = button.border && button.border !== '0px none rgb(0, 0, 0)' ? button.border : `1px solid ${cssVar('--SmartThemeBorderColor') || 'rgba(128,128,128,.45)'}`;
+    const radius = button.borderRadius || cssVar('--SmartThemeBorderRadius') || '8px';
+    const shadow = button.boxShadow && button.boxShadow !== 'none' ? button.boxShadow : (panel.boxShadow && panel.boxShadow !== 'none' ? panel.boxShadow : '0 4px 16px rgba(0,0,0,.16)');
+    root.style.setProperty('--npms-inherit-panel-bg', panelBackground, 'important');
+    root.style.setProperty('--npms-inherit-button-bg', buttonBackground, 'important');
+    root.style.setProperty('--npms-inherit-color', color, 'important');
+    root.style.setProperty('--npms-inherit-muted', input.color || color, 'important');
+    root.style.setProperty('--npms-inherit-border', border, 'important');
+    root.style.setProperty('--npms-inherit-radius', radius, 'important');
+    root.style.setProperty('--npms-inherit-shadow', shadow, 'important');
+    root.style.setProperty('--npms-inherit-font', button.fontFamily || panel.fontFamily || bodyStyle.fontFamily || 'inherit', 'important');
+}
+
+let floatingThemeObserver;
+function observeFloatingThemeChanges() {
+    if (floatingThemeObserver || typeof MutationObserver === 'undefined') return;
+    floatingThemeObserver = new MutationObserver(() => {
+        const root = document.querySelector('#npms_floating_lyrics');
+        if (root && floatingLyricsConfig().playerTheme === 'inherit') {
+            applyInheritedPlayerTheme(root);
+            applyFloatingStyleCss();
+        }
+    });
+    floatingThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+    floatingThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+}
+
+function applyIsolatedFloatingStyles(root) {
+    const config = floatingLyricsConfig();
+    applyInheritedPlayerTheme(root);
+    root.style.setProperty('isolation', 'isolate', 'important');
+    root.style.setProperty('contain', 'layout style paint', 'important');
+    root.style.setProperty('unicode-bidi', 'isolate', 'important');
+    const controls = root.querySelector('.npms-floating-controls');
+    const playlist = root.querySelector('.npms-floating-playlist-panel');
+    const lines = root.querySelector('.npms-floating-lines');
+    const inherit = config.playerStyleMode === 'inherit';
+    [controls, playlist].filter(Boolean).forEach(node => {
+        node.style.setProperty('font-family', inherit ? 'inherit' : 'var(--npms-float-font, inherit)', 'important');
+    });
+    // Lyric appearance remains independent of the player/list style scheme.
+    if (lines) {
+        lines.style.setProperty('font-family', floatingFontValue(config), 'important');
+        lines.style.setProperty('color', config.fontColor, 'important');
+        lines.style.setProperty('filter', config.glowStrength > 0 ? `drop-shadow(0 0 3px ${config.glowColor}) drop-shadow(0 0 ${config.glowStrength}px ${config.glowColor})` : 'none', 'important');
+        lines.querySelectorAll('.npms-floating-lyric-line').forEach(line => {
+            line.style.setProperty('font-family', floatingFontValue(config), 'important');
+            line.style.setProperty('color', config.fontColor, 'important');
+            line.style.setProperty('text-shadow', 'none', 'important');
+        });
+    }
+    applyFloatingStyleCss();
+}
+
+function exportFloatingStyleConfig() {
+    const config = floatingLyricsConfig();
+    const payload = { styleMode: config.playerTheme === 'inherit' ? 'inherit' : config.playerTheme === 'custom' ? 'custom' : 'preset', customCss: config.playerCustomCss, fontColor: config.fontColor, glowColor: config.glowColor, glowStrength: config.glowStrength, fontSize: config.fontSize, fontFamily: config.fontFamily, customFont: config.customFont, fontUrl: config.fontUrl, fontUrlEnabled: config.fontUrlEnabled, playerTheme: config.playerTheme };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'floating-lyrics-style.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function importFloatingStyleConfig(event, root) {
+    const file = event.target.files?.[0]; event.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            const data = JSON.parse(String(reader.result || '{}')); const config = settings();
+            if (['inherit', 'preset', 'custom'].includes(data.styleMode)) { config.floatingPlayerStyleMode = data.styleMode; if (data.styleMode === 'inherit' || data.styleMode === 'custom') config.floatingPlayerTheme = data.styleMode; }
+            if (typeof data.customCss === 'string') config.floatingPlayerCustomCss = data.customCss.slice(0, 12000);
+            if (typeof data.fontColor === 'string') config.floatingLyricsFontColor = sanitizeHexColor(data.fontColor, config.floatingLyricsFontColor || '#ffffff');
+            if (typeof data.glowColor === 'string') config.floatingLyricsGlowColor = sanitizeHexColor(data.glowColor, config.floatingLyricsGlowColor || '#000000');
+            if (Number.isFinite(Number(data.glowStrength))) config.floatingLyricsGlowStrength = Math.max(0, Math.min(30, Number(data.glowStrength)));
+            if (Number.isFinite(Number(data.fontSize))) config.floatingLyricsFontSize = Math.max(12, Math.min(32, Number(data.fontSize)));
+            if (typeof data.fontFamily === 'string') config.floatingLyricsFontFamily = data.fontFamily;
+            if (typeof data.customFont === 'string') config.floatingLyricsCustomFont = data.customFont.slice(0, 100);
+            if (typeof data.fontUrl === 'string') config.floatingLyricsFontUrl = data.fontUrl.slice(0, 2048);
+            if (typeof data.fontUrlEnabled === 'boolean') config.floatingLyricsFontUrlEnabled = data.fontUrlEnabled;
+            if (['dark', 'light', 'glass', 'glass-light', 'inherit', 'custom'].includes(data.playerTheme)) config.floatingPlayerTheme = data.playerTheme;
+            saveSettingsDebounced(); syncFloatingLyricsControls(root);
+        } catch (error) { console.warn('[你自己的音乐源] invalid floating style file', error); }
+    };
+    reader.readAsText(file);
 }
 
 function removeFloatingLyrics() {
@@ -562,15 +708,15 @@ function ensureFloatingLyrics() {
     root.style.setProperty('--npms-float-glow-color', config.glowColor);
     root.style.setProperty('--npms-float-glow', `${config.glowStrength}px`);
     root.style.setProperty('--npms-float-shadow', config.glowStrength > 0 ? `0 0 1px ${config.glowColor}` : 'none');
-    const lyricLines = root.querySelector('.npms-floating-lines');
-    if (lyricLines) lyricLines.style.filter = config.glowStrength > 0
-        ? `drop-shadow(0 0 3px ${config.glowColor}) drop-shadow(0 0 ${config.glowStrength}px ${config.glowColor})`
-        : 'none';
+    applyIsolatedFloatingStyles(root);
+    observeFloatingThemeChanges();
     root.style.setProperty('--npms-float-size', `${config.fontSize}px`);
     root.classList.toggle('theme-light', config.playerTheme === 'light');
     root.classList.toggle('theme-glass', config.playerTheme === 'glass');
     root.classList.toggle('theme-glass-light', config.playerTheme === 'glass-light');
     root.classList.toggle('theme-dark', config.playerTheme === 'dark');
+    root.classList.toggle('theme-inherit', config.playerTheme === 'inherit');
+    root.classList.toggle('theme-custom', config.playerTheme === 'custom');
     if (config.fontFamily === 'global') root.style.removeProperty('--npms-float-font');
     else root.style.setProperty('--npms-float-font', floatingFontValue(config));
     if (config.fontUrlEnabled && config.fontUrl) void loadFloatingFont(config.fontUrl);
@@ -608,6 +754,7 @@ function renderFloatingLyrics(index) {
     } else {
         lines.replaceChildren(makeLine(lyrics[index - 1], 'is-previous'), makeLine(lyrics[index], 'is-current', true), makeLine(lyrics[index + 1], 'is-next'));
     }
+    applyIsolatedFloatingStyles(root);
     lines.classList.remove('is-advancing'); void lines.offsetWidth; lines.classList.add('is-advancing');
     updateFloatingPlayerControls(root);
 }
@@ -627,6 +774,7 @@ function syncFloatingLyricsControls(root = document) {
         '#npms_floating_lyrics_font_url': ['value', config.fontUrl],
         '#npms_floating_lyrics_font_url_enabled': ['checked', config.fontUrlEnabled],
         '#npms_floating_player_theme': ['value', config.playerTheme],
+        '#npms_floating_player_custom_css': ['value', config.playerCustomCss],
     };
     for (const [selector, [property, value]] of Object.entries(values)) { const node = root.querySelector(selector); if (node) node[property] = value; }
     root.querySelector('#npms_floating_lyrics_font_color_value')?.replaceChildren(document.createTextNode(config.fontColor));
@@ -646,7 +794,9 @@ function saveFloatingLyricsControls(root) {
     config.floatingLyricsFontSize = Number(root.querySelector('#npms_floating_lyrics_font_size')?.value) || 18;
     config.floatingLyricsFontFamily = root.querySelector('#npms_floating_lyrics_font_family')?.value || 'global';
     const selectedTheme = root.querySelector('#npms_floating_player_theme')?.value;
-    config.floatingPlayerTheme = ['dark', 'light', 'glass', 'glass-light'].includes(selectedTheme) ? selectedTheme : 'dark';
+    config.floatingPlayerTheme = ['dark', 'light', 'glass', 'glass-light', 'inherit', 'custom'].includes(selectedTheme) ? selectedTheme : 'dark';
+    config.floatingPlayerStyleMode = selectedTheme === 'inherit' ? 'inherit' : selectedTheme === 'custom' ? 'custom' : 'preset';
+    config.floatingPlayerCustomCss = String(root.querySelector('#npms_floating_player_custom_css')?.value || '').slice(0, 12000);
     const nextFontUrl = String(root.querySelector('#npms_floating_lyrics_font_url')?.value || '').trim().slice(0, 2048);
     if (nextFontUrl !== config.floatingLyricsFontUrl) floatingFontLoadedUrl = '';
     config.floatingLyricsFontUrl = nextFontUrl;
@@ -1242,7 +1392,7 @@ function panelHtml() {
  <div class="inline-drawer-toggle inline-drawer-header"><b>你自己的音乐源</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
  <div class="inline-drawer-content npms-paper"><nav class="npms-tabs" role="tablist"><button class="npms-tab is-active" data-npms-tab="home">主页</button><button class="npms-tab" data-npms-tab="player">播放器</button><button class="npms-tab" data-npms-tab="local">本地音乐</button><button class="npms-tab" data-npms-tab="deploy">部署</button><button class="npms-tab" data-npms-tab="tools">工具</button></nav>
  <section class="npms-page is-active" data-npms-page="home"><div class="npms-section-heading"><span>01</span><div><b>连接与账号</b><small>选择平台，并连接只属于你的曲库。</small></div></div><div id="npms_status" class="npms-status">等待检查后端</div><div class="npms-provider-switch"><button type="button" data-provider="netease" class="npms-provider-button"><span>网易云音乐</span><small>NETEASE</small></button><button type="button" data-provider="qq" class="npms-provider-button"><span>QQ 音乐</span><small>QQ MUSIC</small></button></div><div class="npms-actions npms-primary-actions"><button id="npms_refresh" class="menu_button">↻ 刷新状态</button><button id="npms_qr_start" class="menu_button">＋ 扫码登录</button><button id="npms_logout" class="menu_button">清除登录</button></div><div id="npms_qr_box" class="npms-qr" hidden><img id="npms_qr_image" alt="登录二维码"><button id="npms_qr_cancel" class="menu_button">取消扫码</button></div><details class="npms-detail-card npms-cookie-fold"><summary><b>Cookie 登录</b><span>可选</span></summary><div class="npms-detail-body"><div class="npms-field-card"><label id="npms_cookie_label" for="npms_cookie">平台 Cookie <small>仅提交到本机后端</small></label><textarea id="npms_cookie" rows="3" placeholder="在这里粘贴平台 Cookie"></textarea><button id="npms_cookie_save" class="menu_button">保存并验证 Cookie</button></div></div></details><p class="npms-privacy-note">账号凭据只保存在 SillyTavern 后端，不写入聊天、角色卡或前端设置。</p></section>
- <section class="npms-page" data-npms-page="player" hidden><div class="npms-section-heading"><span>02</span><div><b>播放器</b><small>搜索歌曲、解析分享链接，或播放本地曲目。</small></div></div><div class="npms-field-card npms-account-playlists"><label for="npms_account_playlist">账号歌单 <small>登录后自动读取目录；每个歌单最多载入 500 首</small></label><div class="npms-select-row"><select id="npms_account_playlist" disabled><option value="">登录后自动显示账号歌单目录</option></select><select id="npms_account_playlist_limit" aria-label="歌单载入数量"><option value="300" selected>前 300 首（推荐）</option><option value="500">前 500 首</option></select><button id="npms_account_playlist_load" class="menu_button" disabled>载入所选歌单</button></div></div><details class="npms-detail-card npms-floating-lyrics-settings"><summary><b>主页面悬浮歌词</b><span>默认关闭</span></summary><div class="npms-detail-body"><label class="npms-check-row"><input id="npms_floating_lyrics_enabled" type="checkbox"><span>在酒馆主页面显示同步歌词</span></label><button type="button" id="npms_floating_lyrics_reset_position" class="menu_button npms-position-reset">重置到顶部居中</button><div class="npms-floating-options"><label>字体颜色<div class="npms-color-control"><input id="npms_floating_lyrics_font_color_text" type="text" inputmode="text" maxlength="7" value="ffffff" aria-label="字体颜色六位编码"><input id="npms_floating_lyrics_font_color" type="color" value="#ffffff" aria-label="选择字体颜色"></div></label><label>晕染颜色<div class="npms-color-control"><input id="npms_floating_lyrics_glow_color_text" type="text" inputmode="text" maxlength="7" value="000000" aria-label="晕染颜色六位编码"><input id="npms_floating_lyrics_glow_color" type="color" value="#000000" aria-label="选择晕染颜色"></div></label><label>晕染强度 <output id="npms_floating_lyrics_glow_value">12px</output><input id="npms_floating_lyrics_glow" type="range" min="0" max="30" step="1" value="12"></label><label>字体大小 <output id="npms_floating_lyrics_font_size_value">18px</output><input id="npms_floating_lyrics_font_size" type="range" min="12" max="32" step="1" value="18"></label><label>播放栏配色<select id="npms_floating_player_theme"><option value="dark">灰黑底浅色字</option><option value="light">灰白底深色字</option><option value="glass">灰黑底毛玻璃</option><option value="glass-light">浅色底毛玻璃</option></select></label><label>字体<select id="npms_floating_lyrics_font_family"><option value="global">跟随酒馆全局</option><option value="serif">衬线</option><option value="sans-serif">无衬线</option><option value="monospace">等宽</option><option value="custom">本地字体</option><option value="url">网络字体</option></select></label><label>本地字体<input id="npms_floating_lyrics_custom_font" type="text"></label><label class="npms-font-url-field">网络字体地址<input id="npms_floating_lyrics_font_url" type="url" inputmode="url"></label><label class="npms-check-row npms-font-url-toggle"><input id="npms_floating_lyrics_font_url_enabled" type="checkbox"><span>启用网络字体</span></label></div></div></details><div class="npms-mini-player"><div class="npms-compact-main"><div id="npms_player_title_wrap" class="npms-player-title-wrap"><span id="npms_player_ticker" class="npms-player-ticker">Loading...</span></div><div id="npms_player_time" class="npms-player-time">0:00/0:00</div><div class="npms-player-controls"><button id="npms_player_prev" class="npms-player-key">&lt;&lt;</button><button id="npms_player_play" class="npms-player-key">&gt;</button><button id="npms_player_next" class="npms-player-key">&gt;&gt;</button><button id="npms_player_mode" class="npms-player-key">SEQ</button></div><label class="npms-volume"><b>VOL</b><input id="npms_player_volume" type="range" min="0" max="100" value="60"></label></div><div id="npms_player_progress_track" class="npms-progress-track"><div id="npms_player_progress" class="npms-progress-bar"></div></div><div class="npms-lyric-window"><div id="npms_player_lyric" class="npms-lyric-stack"><div class="npms-lyric-line is-current"><span>歌词将在播放时显示</span></div></div></div><div class="npms-playlist-loader"><input id="npms_playlist_input" type="text" placeholder="歌曲 歌手 / 单曲或歌单分享链接"><button id="npms_playlist_load" class="menu_button">搜索 / 解析</button><button id="npms_local_load" class="menu_button">本地音乐</button></div><div class="npms-player-foot"><span id="npms_player_count">0 / 0</span><span>SEQ · ONE · RND</span></div></div></section>
+ <section class="npms-page" data-npms-page="player" hidden><div class="npms-section-heading"><span>02</span><div><b>播放器</b><small>搜索歌曲、解析分享链接，或播放本地曲目。</small></div></div><div class="npms-field-card npms-account-playlists"><label for="npms_account_playlist">账号歌单 <small>登录后自动读取目录；每个歌单最多载入 500 首</small></label><div class="npms-select-row"><select id="npms_account_playlist" disabled><option value="">登录后自动显示账号歌单目录</option></select><select id="npms_account_playlist_limit" aria-label="歌单载入数量"><option value="300" selected>前 300 首（推荐）</option><option value="500">前 500 首</option></select><button id="npms_account_playlist_load" class="menu_button" disabled>载入所选歌单</button></div></div><details class="npms-detail-card npms-floating-lyrics-settings"><summary><b>主页面悬浮歌词</b><span>默认关闭</span></summary><div class="npms-detail-body"><label class="npms-check-row"><input id="npms_floating_lyrics_enabled" type="checkbox"><span>在酒馆主页面显示同步歌词</span></label><button type="button" id="npms_floating_lyrics_reset_position" class="menu_button npms-position-reset">重置到顶部居中</button><div class="npms-floating-options"><label>字体颜色<div class="npms-color-control"><input id="npms_floating_lyrics_font_color_text" type="text" inputmode="text" maxlength="7" value="ffffff" aria-label="字体颜色六位编码"><input id="npms_floating_lyrics_font_color" type="color" value="#ffffff" aria-label="选择字体颜色"></div></label><label>晕染颜色<div class="npms-color-control"><input id="npms_floating_lyrics_glow_color_text" type="text" inputmode="text" maxlength="7" value="000000" aria-label="晕染颜色六位编码"><input id="npms_floating_lyrics_glow_color" type="color" value="#000000" aria-label="选择晕染颜色"></div></label><label>晕染强度 <output id="npms_floating_lyrics_glow_value">12px</output><input id="npms_floating_lyrics_glow" type="range" min="0" max="30" step="1" value="12"></label><label>字体大小 <output id="npms_floating_lyrics_font_size_value">18px</output><input id="npms_floating_lyrics_font_size" type="range" min="12" max="32" step="1" value="18"></label><label>播放栏 CSS<textarea id="npms_floating_player_custom_css" rows="4"></textarea></label><div class="npms-style-file-actions"><button type="button" id="npms_floating_lyrics_export" class="menu_button">导出方案</button><button type="button" id="npms_floating_lyrics_import_button" class="menu_button">导入方案</button><input id="npms_floating_lyrics_import" type="file" accept="application/json" hidden></div><label>播放栏配色<select id="npms_floating_player_theme"><option value="dark">灰黑底浅色字</option><option value="light">灰白底深色字</option><option value="glass">深色毛玻璃</option><option value="glass-light">浅色毛玻璃</option><option value="inherit">继承酒馆 CSS</option><option value="custom">自定义</option></select></label><label>字体<select id="npms_floating_lyrics_font_family"><option value="global">跟随酒馆全局</option><option value="serif">衬线</option><option value="sans-serif">无衬线</option><option value="monospace">等宽</option><option value="custom">本地字体</option><option value="url">网络字体</option></select></label><label>本地字体<input id="npms_floating_lyrics_custom_font" type="text"></label><label class="npms-font-url-field">网络字体地址<input id="npms_floating_lyrics_font_url" type="url" inputmode="url"></label><label class="npms-check-row npms-font-url-toggle"><input id="npms_floating_lyrics_font_url_enabled" type="checkbox"><span>启用网络字体</span></label></div></div></details><div class="npms-mini-player"><div class="npms-compact-main"><div id="npms_player_title_wrap" class="npms-player-title-wrap"><span id="npms_player_ticker" class="npms-player-ticker">Loading...</span></div><div id="npms_player_time" class="npms-player-time">0:00/0:00</div><div class="npms-player-controls"><button id="npms_player_prev" class="npms-player-key">&lt;&lt;</button><button id="npms_player_play" class="npms-player-key">&gt;</button><button id="npms_player_next" class="npms-player-key">&gt;&gt;</button><button id="npms_player_mode" class="npms-player-key">SEQ</button></div><label class="npms-volume"><b>VOL</b><input id="npms_player_volume" type="range" min="0" max="100" value="60"></label></div><div id="npms_player_progress_track" class="npms-progress-track"><div id="npms_player_progress" class="npms-progress-bar"></div></div><div class="npms-lyric-window"><div id="npms_player_lyric" class="npms-lyric-stack"><div class="npms-lyric-line is-current"><span>歌词将在播放时显示</span></div></div></div><div class="npms-playlist-loader"><input id="npms_playlist_input" type="text" placeholder="歌曲 歌手 / 单曲或歌单分享链接"><button id="npms_playlist_load" class="menu_button">搜索 / 解析</button><button id="npms_local_load" class="menu_button">本地音乐</button></div><div class="npms-player-foot"><span id="npms_player_count">0 / 0</span><span>SEQ · ONE · RND</span></div></div></section>
  <section class="npms-page" data-npms-page="local" hidden><div class="npms-section-heading"><span>03</span><div><b>本地音乐</b><small>连接运行酒馆的设备或服务器中的音乐目录。</small></div></div><div class="npms-field-card"><label for="npms_local_dir">音乐目录绝对路径</label><input id="npms_local_dir" type="text" placeholder="C:\\Users\\你\\Music、/Users/你/Music 或 /home/你/Music"><div class="npms-examples">Windows：<code>C:\Users\你\Music</code><br>macOS：<code>/Users/你/Music</code><br>Linux：<code>/home/你/Music</code><br>Termux：<code>/data/data/com.termux/files/home/storage/music</code></div><div class="npms-actions"><button id="npms_dir_inspect" class="menu_button">检测目录</button><button id="npms_dir_save" class="menu_button">保存并连接</button><button id="npms_rescan" class="menu_button">重新扫描</button></div></div><div class="npms-format-strip"><b>支持格式</b><span>MP3</span><span>FLAC</span><span>M4A</span><span>WAV</span><span>OGG</span><span>AAC</span><span>WEBM</span><span>OPUS</span></div><p class="npms-privacy-note">Docker 请填写容器内可见路径，并使用持久化卷。</p></section>
  <section class="npms-page" data-npms-page="deploy" hidden><div class="npms-section-heading"><span>04</span><div><b>后端管理</b><small>选择操作与 SillyTavern 实际运行的平台。</small></div></div><div class="npms-manage-tabs"><button class="npms-manage-tab is-active" data-manage-mode="install">安装 / 更新后端</button><button class="npms-manage-tab" data-manage-mode="remove">删除后端</button></div><div class="npms-deploy-grid">
 <article class="npms-deploy-card"><header><b>Android</b><small>TERMUX</small></header><textarea id="npms_install_command_termux" data-install-command="${TERMUX_INSTALL_COMMAND}" data-remove-command="${TERMUX_REMOVE_BACKEND_COMMAND}" rows="3" readonly>${TERMUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_termux" class="menu_button">复制安装 / 更新命令</button></article>
@@ -1284,8 +1434,11 @@ function bind() {
     root.querySelector('#npms_qr_cancel').addEventListener('click', () => { stopQrPolling(); root.querySelector('#npms_qr_box').hidden = true; setStatus('已取消扫码'); });
     root.querySelector('#npms_cookie_save').addEventListener('click', saveCookie);
     root.querySelector('#npms_account_playlist_load').addEventListener('click', loadSelectedAccountPlaylist);
-    const floatingControls = ['#npms_floating_lyrics_enabled', '#npms_floating_lyrics_glow', '#npms_floating_lyrics_font_size', '#npms_floating_player_theme', '#npms_floating_lyrics_font_family', '#npms_floating_lyrics_custom_font', '#npms_floating_lyrics_font_url', '#npms_floating_lyrics_font_url_enabled'];
+    const floatingControls = ['#npms_floating_lyrics_enabled', '#npms_floating_lyrics_glow', '#npms_floating_lyrics_font_size', '#npms_floating_player_style_mode', '#npms_floating_player_custom_css', '#npms_floating_player_theme', '#npms_floating_lyrics_font_family', '#npms_floating_lyrics_custom_font', '#npms_floating_lyrics_font_url', '#npms_floating_lyrics_font_url_enabled'];
     floatingControls.forEach(selector => root.querySelector(selector)?.addEventListener('input', () => saveFloatingLyricsControls(root)));
+    root.querySelector('#npms_floating_lyrics_export')?.addEventListener('click', exportFloatingStyleConfig);
+    root.querySelector('#npms_floating_lyrics_import_button')?.addEventListener('click', () => root.querySelector('#npms_floating_lyrics_import')?.click());
+    root.querySelector('#npms_floating_lyrics_import')?.addEventListener('change', event => importFloatingStyleConfig(event, root));
     const bindColor = (textSelector, pickerSelector, fallback) => {
         const text = root.querySelector(textSelector); const picker = root.querySelector(pickerSelector);
         text?.addEventListener('input', () => {

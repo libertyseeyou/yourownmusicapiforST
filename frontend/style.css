@@ -599,3 +599,208 @@
 .npms-floating-player.theme-glass-light .npms-floating-progress::-moz-range-track { background: rgba(41,41,45,.3) !important; }
 .npms-floating-player.theme-glass-light .npms-floating-progress::-moz-range-progress,
 .npms-floating-player.theme-glass-light .npms-floating-progress::-moz-range-thumb { background: #29292d !important; }
+.npms-style-file-actions { display: flex; gap: 8px; margin: 8px 0; }
+.npms-style-file-actions .menu_button { flex: 1; }
+.npms-floating-options textarea#npms_floating_lyrics_custom_css { min-height: 84px; font: .74rem/1.4 ui-monospace, monospace; }
+
+/* The inherit scheme delegates visual chrome back to SillyTavern's cascade. */
+.npms-floating-player.theme-inherit .npms-floating-controls,
+.npms-floating-player.theme-inherit .npms-floating-playlist-panel {
+  color: revert !important;
+  background: revert !important;
+  border: revert !important;
+  border-radius: revert !important;
+  box-shadow: revert !important;
+  filter: revert !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button,
+.npms-floating-player.theme-inherit .npms-floating-time-current,
+.npms-floating-player.theme-inherit .npms-floating-time-total,
+.npms-floating-player.theme-inherit .npms-floating-track {
+  color: revert !important;
+  background: revert !important;
+  border: revert !important;
+  box-shadow: revert !important;
+  text-shadow: revert !important;
+  font-family: revert !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-play {
+  color: revert !important;
+  background: revert !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress {
+  background: revert !important;
+  border: revert !important;
+  box-shadow: revert !important;
+  accent-color: revert !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-runnable-track,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-track,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-progress {
+  background: revert !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-thumb,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-thumb {
+  background: revert !important;
+  border: revert !important;
+  box-shadow: revert !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-track:hover,
+.npms-floating-player.theme-inherit .npms-floating-track.is-current {
+  background: revert !important;
+}
+
+/* Theme-following player skin: consume SillyTavern theme tokens instead of plugin colors. */
+.npms-floating-player.theme-inherit {
+  --npms-player-bg: var(--SmartThemeBlurTintColor, transparent);
+  --npms-player-fg: var(--SmartThemeBodyColor, currentColor);
+  --npms-player-muted: color-mix(in srgb, var(--SmartThemeBodyColor, currentColor) 68%, transparent);
+  --npms-player-track: color-mix(in srgb, var(--SmartThemeBodyColor, currentColor) 30%, transparent);
+}
+.npms-floating-player.theme-inherit .npms-floating-controls,
+.npms-floating-player.theme-inherit .npms-floating-playlist-panel {
+  color: var(--SmartThemeBodyColor, currentColor) !important;
+  background: var(--SmartThemeBlurTintColor, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, currentColor) 25%, transparent) !important;
+  border-radius: var(--SmartThemeBorderRadius, 8px) !important;
+  box-shadow: var(--SmartThemeShadow, 0 4px 16px rgba(0,0,0,.12)) !important;
+  filter: none !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button,
+.npms-floating-player.theme-inherit .npms-floating-time-current,
+.npms-floating-player.theme-inherit .npms-floating-time-total,
+.npms-floating-player.theme-inherit .npms-floating-track {
+  color: var(--SmartThemeBodyColor, currentColor) !important;
+  font-family: inherit !important;
+  text-shadow: none !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button:hover,
+.npms-floating-player.theme-inherit .npms-floating-track:hover,
+.npms-floating-player.theme-inherit .npms-floating-track.is-current {
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, currentColor) 12%, transparent) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-controls .npms-floating-play {
+  color: var(--SmartThemeBlurTintColor, transparent) !important;
+  background: var(--SmartThemeBodyColor, currentColor) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-runnable-track,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-track {
+  background: var(--npms-player-track) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-progress,
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-thumb,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-thumb {
+  background: var(--SmartThemeBodyColor, currentColor) !important;
+}
+
+/* Inherit the actual active SillyTavern component skin. */
+.npms-floating-player.theme-inherit .npms-floating-controls,
+.npms-floating-player.theme-inherit .npms-floating-playlist-panel {
+  color: var(--npms-inherit-color, currentColor) !important;
+  background: var(--npms-inherit-panel-bg, transparent) !important;
+  border: var(--npms-inherit-border, 0) !important;
+  border-radius: var(--npms-inherit-radius, 0) !important;
+  box-shadow: var(--npms-inherit-shadow, none) !important;
+  filter: none !important;
+  font-family: var(--npms-inherit-font, inherit) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button,
+.npms-floating-player.theme-inherit .npms-floating-time-current,
+.npms-floating-player.theme-inherit .npms-floating-time-total,
+.npms-floating-player.theme-inherit .npms-floating-track {
+  color: var(--npms-inherit-color, currentColor) !important;
+  font-family: var(--npms-inherit-font, inherit) !important;
+  text-shadow: none !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button:hover,
+.npms-floating-player.theme-inherit .npms-floating-track:hover,
+.npms-floating-player.theme-inherit .npms-floating-track.is-current {
+  background: var(--npms-inherit-button-bg, transparent) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-controls .npms-floating-play {
+  color: var(--npms-inherit-color, currentColor) !important;
+  background: var(--npms-inherit-button-bg, transparent) !important;
+  border: var(--npms-inherit-border, 0) !important;
+  border-radius: var(--npms-inherit-radius, 50%) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-runnable-track,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-track {
+  background: var(--npms-inherit-muted, currentColor) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-progress,
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-thumb,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-thumb {
+  background: var(--npms-inherit-color, currentColor) !important;
+}
+
+/* Inherit mode: sampled real Tavern components, with a readable fallback surface. */
+.npms-floating-player.theme-inherit .npms-floating-controls,
+.npms-floating-player.theme-inherit .npms-floating-playlist-panel {
+  color: var(--npms-inherit-color, var(--SmartThemeBodyColor, #eee)) !important;
+  background: var(--npms-inherit-panel-bg, rgba(128,128,128,.22)) !important;
+  border: var(--npms-inherit-border, 1px solid rgba(128,128,128,.45)) !important;
+  border-radius: var(--npms-inherit-radius, 8px) !important;
+  box-shadow: var(--npms-inherit-shadow, 0 4px 16px rgba(0,0,0,.16)) !important;
+  font-family: var(--npms-inherit-font, inherit) !important;
+  filter: none !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button,
+.npms-floating-player.theme-inherit .npms-floating-time-current,
+.npms-floating-player.theme-inherit .npms-floating-time-total,
+.npms-floating-player.theme-inherit .npms-floating-track {
+  color: var(--npms-inherit-color, var(--SmartThemeBodyColor, #eee)) !important;
+  font-family: var(--npms-inherit-font, inherit) !important;
+  text-shadow: none !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button:hover,
+.npms-floating-player.theme-inherit .npms-floating-track:hover,
+.npms-floating-player.theme-inherit .npms-floating-track.is-current {
+  background: var(--npms-inherit-button-bg, rgba(128,128,128,.28)) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-controls .npms-floating-play {
+  color: var(--npms-inherit-panel-bg, #222) !important;
+  background: var(--npms-inherit-color, #eee) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-runnable-track,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-track { background: var(--npms-inherit-muted, rgba(128,128,128,.3)) !important; }
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-progress,
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-thumb,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-thumb { background: var(--npms-inherit-color, currentColor) !important; }
+
+/* Inherit mode uses the actual visible Tavern surfaces, never the extension panel itself. */
+.npms-floating-player.theme-inherit .npms-floating-controls,
+.npms-floating-player.theme-inherit .npms-floating-playlist-panel {
+  color: var(--npms-inherit-color, var(--SmartThemeBodyColor, #e8e8e8)) !important;
+  background: var(--npms-inherit-panel-bg, rgba(96,96,104,.32)) !important;
+  border: var(--npms-inherit-border, 1px solid rgba(128,128,128,.46)) !important;
+  border-radius: var(--npms-inherit-radius, 8px) !important;
+  box-shadow: var(--npms-inherit-shadow, 0 4px 16px rgba(0,0,0,.18)) !important;
+  font-family: var(--npms-inherit-font, inherit) !important;
+  filter: none !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button,
+.npms-floating-player.theme-inherit .npms-floating-time-current,
+.npms-floating-player.theme-inherit .npms-floating-time-total,
+.npms-floating-player.theme-inherit .npms-floating-track {
+  color: var(--npms-inherit-color, var(--SmartThemeBodyColor, #e8e8e8)) !important;
+  font-family: var(--npms-inherit-font, inherit) !important;
+  text-shadow: none !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-controls .npms-floating-play {
+  color: var(--npms-inherit-panel-bg, #222) !important;
+  background: var(--npms-inherit-color, #eee) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-control-row > button:hover,
+.npms-floating-player.theme-inherit .npms-floating-track:hover,
+.npms-floating-player.theme-inherit .npms-floating-track.is-current {
+  background: var(--npms-inherit-button-bg, rgba(128,128,128,.28)) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-runnable-track,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-track {
+  background: var(--npms-inherit-muted, rgba(128,128,128,.32)) !important;
+}
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-progress,
+.npms-floating-player.theme-inherit .npms-floating-progress::-webkit-slider-thumb,
+.npms-floating-player.theme-inherit .npms-floating-progress::-moz-range-thumb {
+  background: var(--npms-inherit-color, currentColor) !important;
+}
