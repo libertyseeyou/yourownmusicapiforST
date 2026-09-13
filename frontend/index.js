@@ -54,6 +54,18 @@ const state = {
     },
 };
 
+const isTauriTavern = Boolean(globalThis.__TAURITAVERN__ || globalThis.__TAURI_INTERNALS__ || globalThis.__TAURI__);
+let themeSampleTimer = null;
+let themeSamplePending = false;
+let scriptScanInProgress = false;
+
+function yieldToWebView() {
+    return new Promise(resolve => {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(resolve, 0));
+        else setTimeout(resolve, 0);
+    });
+}
+
 function settings() {
     extension_settings[EXTENSION_ID] ||= {};
     for (const [key, value] of Object.entries(DEFAULTS)) {
@@ -476,11 +488,19 @@ let floatingThemeObserver;
 function observeFloatingThemeChanges() {
     if (floatingThemeObserver || typeof MutationObserver === 'undefined') return;
     floatingThemeObserver = new MutationObserver(() => {
-        const root = document.querySelector('#npms_floating_lyrics');
-        if (root && floatingLyricsConfig().playerTheme === 'inherit') {
-            applyInheritedPlayerTheme(root);
-            applyFloatingStyleCss();
-        }
+        if (themeSamplePending) return;
+        themeSamplePending = true;
+        if (themeSampleTimer) return;
+        themeSampleTimer = setTimeout(() => {
+            themeSampleTimer = null;
+            if (!themeSamplePending) return;
+            themeSamplePending = false;
+            const root = document.querySelector('#npms_floating_lyrics');
+            if (root && floatingLyricsConfig().playerTheme === 'inherit') {
+                applyInheritedPlayerTheme(root);
+                applyFloatingStyleCss();
+            }
+        }, isTauriTavern ? 180 : 80);
     });
     floatingThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
     floatingThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
@@ -1323,24 +1343,42 @@ function renderScriptCandidates(candidates) {
         button.className = 'menu_button';
         button.textContent = candidate.total ? '创建适配副本' : '仅提示，暂不可自动替换';
         button.disabled = candidate.total === 0;
-        button.addEventListener('click', () => adaptPlayerScript(candidate, options.querySelector('input').checked, button));
+        button.addEventListener('click', () => { void adaptPlayerScript(candidate, options.querySelector('input').checked, button); });
         if (candidate.endpointUrls.length) { const urls = document.createElement('code'); urls.className = 'npms-candidate-urls'; urls.textContent = candidate.endpointUrls.join('\n'); card.append(title, meta, urls, options, button); return card; }
         card.append(title, meta, options, button);
         return card;
     }));
 }
 
-function scanPlayerScripts() {
-    const scripts = getTavernHelperScripts();
-    if (!scripts) {
-        setStatus('没有检测到酒馆助手脚本数据；请确认已安装并启用酒馆助手', 'warn');
-        appendFeedback('扫描播放器脚本', 'extension_settings.tavern_helper.script.scripts 不存在', false);
-        return;
+async function scanPlayerScripts() {
+    if (scriptScanInProgress) return;
+    scriptScanInProgress = true;
+    const button = document.querySelector('#npms_scan_scripts');
+    if (button) { button.disabled = true; button.textContent = '扫描中…'; }
+    try {
+        const scripts = getTavernHelperScripts();
+        if (!scripts) {
+            setStatus('没有检测到酒馆助手脚本数据；请确认已安装并启用酒馆助手', 'warn');
+            appendFeedback('扫描播放器脚本', 'extension_settings.tavern_helper.script.scripts 不存在', false);
+            return;
+        }
+        const candidates = [];
+        for (let index = 0; index < scripts.length; index += 1) {
+            const candidate = analyzePlayerScript(scripts[index], index);
+            if (candidate) candidates.push(candidate);
+            if ((index + 1) % (isTauriTavern ? 2 : 8) === 0) await yieldToWebView();
+        }
+        renderScriptCandidates(candidates);
+        appendFeedback('扫描播放器脚本完成', { scanned: scripts.length, candidates: candidates.map(item => ({ name: item.name, replacements: item.total })) }, true);
+        setStatus(candidates.length ? `找到 ${candidates.length} 个可适配的播放器脚本，请逐项确认` : '没有找到可安全自动适配的播放器脚本', candidates.length ? 'ok' : 'warn');
+    } catch (error) {
+        renderScriptCandidates([]);
+        appendFeedback('扫描播放器脚本失败', error?.message || String(error), false);
+        setStatus(`扫描失败：${error?.message || error}`, 'error');
+    } finally {
+        scriptScanInProgress = false;
+        if (button) { button.disabled = false; button.textContent = '扫描播放器脚本'; }
     }
-    const candidates = scripts.map(analyzePlayerScript).filter(Boolean);
-    renderScriptCandidates(candidates);
-    appendFeedback('扫描播放器脚本完成', { scanned: scripts.length, candidates: candidates.map(item => ({ name: item.name, replacements: item.total })) }, true);
-    setStatus(candidates.length ? `找到 ${candidates.length} 个可适配的播放器脚本，请逐项确认` : '没有找到可安全自动适配的播放器脚本', candidates.length ? 'ok' : 'warn');
 }
 
 function makeScriptId() {
@@ -1378,7 +1416,7 @@ function adaptPlayerScript(candidate, disableSource, button) {
         saveSettingsDebounced();
         appendFeedback('播放器脚本适配完成', { source: candidate.name, copy: proposedName, replacements: candidate.total, sourceDisabled: disableSource, newId: clone.id }, true);
         setStatus('适配副本已创建并保存，请刷新 SillyTavern 页面使其生效', 'ok');
-        scanPlayerScripts();
+        void scanPlayerScripts();
     } catch (error) {
         appendFeedback('播放器脚本适配失败', error.message || String(error), false);
         setStatus(`适配失败：${error.message || error}`, 'error');
@@ -1417,6 +1455,7 @@ function bind() {
             page.classList.toggle('is-active', active);
             page.hidden = !active;
         });
+        if (isTauriTavern) void yieldToWebView();
     }));
     root.querySelectorAll('[data-manage-mode]').forEach(tab => tab.addEventListener('click', () => {
         const mode = tab.dataset.manageMode;

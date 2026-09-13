@@ -229,11 +229,33 @@ async function getLoginStatus(provider = 'netease') {
 }
 
 function extractQrKey(result) {
-  return result?.body?.data?.unikey || result?.body?.unikey || '';
+  const body = result?.body || result || {};
+  return String(body?.data?.unikey || body?.data?.key || body?.unikey || body?.key || '').trim();
 }
 
 function extractQrPayload(result) {
-  return result?.body?.data || result?.body || {};
+  const body = result?.body || result || {};
+  const candidates = [body?.data, body?.result, body?.data?.data, body];
+  return candidates.find(item => item && typeof item === 'object' && (item.qrurl || item.qrimg)) || {};
+}
+
+function normalizeQrImage(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^data:image\//i.test(text) || /^https?:\/\//i.test(text)) return text;
+  if (/^[A-Za-z0-9+/=\s]+$/.test(text)) return `data:image/png;base64,${text.replace(/\s+/g, '')}`;
+  return '';
+}
+
+async function makeNeteaseQrPayload(key, result) {
+  const payload = extractQrPayload(result);
+  const qrurl = String(payload.qrurl || payload.url || '').trim() || `https://music.163.com/login?codekey=${encodeURIComponent(key)}`;
+  let qrimg = normalizeQrImage(payload.qrimg || payload.image || payload.qrcode);
+  if (!qrimg) {
+    const QRCode = require('qrcode');
+    qrimg = await QRCode.toDataURL(qrurl);
+  }
+  return { qrurl, qrimg };
 }
 
 function extractPlaylistId(input) {
@@ -552,7 +574,7 @@ async function init(router) {
 
   router.post('/auth/cookie', asyncRoute(async (req,res)=>{const provider=normalizeProvider(req.body?.provider);const cookie=provider==='qq'?normalizeQqCookie(req.body?.cookie):normalizeCookie(req.body?.cookie);if(!cookie)return jsonError(res,400,'Cookie is empty');provider==='qq'?saveQqCookie(cookie):saveCookie(cookie);const status=await getLoginStatus(provider);return res.json({ok:true,message:status.loggedIn?'Cookie 已保存并通过验证':'Cookie 已保存，但平台未确认登录状态',...status});}));
   router.post('/auth/logout', async (req,res)=>{const provider=normalizeProvider(req.body?.provider);provider==='qq'?saveQqCookie(''):saveCookie('');res.json({ok:true,provider});});
-  router.post('/auth/qr/start', asyncRoute(async (req,res)=>{const provider=normalizeProvider(req.body?.provider);if(provider==='qq'){const r=await qqSdk.getQQLoginQr();const b=r?.body||{};if(!b.img||!b.qrsig||!b.ptqrtoken)return jsonError(res,502,'QQ 音乐没有返回完整二维码数据',b);const key=Buffer.from(JSON.stringify({ptqrtoken:b.ptqrtoken,qrsig:b.qrsig})).toString('base64url');return res.json({ok:true,provider,message:'QQ 音乐二维码已生成',key,qrimg:b.img,qrurl:''});}const kr=await ncmApi.login_qr_key({});const key=extractQrKey(kr);if(!key)return jsonError(res,502,'网易云没有返回二维码 key');const qr=extractQrPayload(await ncmApi.login_qr_create({key,qrimg:true}));return res.json({ok:true,provider,message:'网易云二维码已生成',key,qrurl:qr.qrurl||'',qrimg:qr.qrimg||''});}));
+  router.post('/auth/qr/start', asyncRoute(async (req,res)=>{const provider=normalizeProvider(req.body?.provider);if(provider==='qq'){const r=await qqSdk.getQQLoginQr();const b=r?.body||{};if(!b.img||!b.qrsig||!b.ptqrtoken)return jsonError(res,502,'QQ 音乐没有返回完整二维码数据',b);const key=Buffer.from(JSON.stringify({ptqrtoken:b.ptqrtoken,qrsig:b.qrsig})).toString('base64url');return res.json({ok:true,provider,message:'QQ 音乐二维码已生成',key,qrimg:b.img,qrurl:''});}const kr=await ncmApi.login_qr_key({});const key=extractQrKey(kr);if(!key)return jsonError(res,502,'网易云没有返回二维码 key',{stage:'key',upstreamCode:kr?.body?.code||kr?.code||null});const rawQr=await ncmApi.login_qr_create({key,qrimg:true,platform:'web'});const qr=await makeNeteaseQrPayload(key,rawQr);if(!qr.qrurl||!qr.qrimg)return jsonError(res,502,'网易云二维码内容生成失败',{stage:'payload',hasQrUrl:Boolean(qr.qrurl),hasQrImage:Boolean(qr.qrimg),upstreamCode:rawQr?.body?.code||rawQr?.code||null});return res.json({ok:true,provider,message:'网易云二维码已生成',key,qrurl:qr.qrurl,qrimg:qr.qrimg});}));
   router.get('/auth/qr/check', asyncRoute(async (req,res)=>{const provider=normalizeProvider(req.query.provider);const key=String(req.query.key||'');if(!key)return jsonError(res,400,'QR key is required');if(provider==='qq'){let state;try{state=JSON.parse(Buffer.from(key,'base64url').toString('utf8'));}catch{return jsonError(res,400,'Invalid QQ QR state')}const r=await qqSdk.checkQQLoginQr(state);const b=r?.body||{};if(b.isOk&&b.session?.cookie)saveQqCookie(b.session.cookie);return res.json({ok:true,provider,code:b.isOk?803:b.refresh?800:801,message:b.message||'',loggedIn:Boolean(b.isOk)});}const r=await ncmApi.login_qr_check({key});const b=r?.body||{};if(Number(b.code)===803&&b.cookie)saveCookie(b.cookie);return res.json({ok:true,provider,code:Number(b.code)||0,message:b.message||'',loggedIn:Number(b.code)===803});}));
   router.post('/auth/captcha/send', asyncRoute(async (req, res) => {
     const phone = String(req.body?.phone || '').trim();
@@ -596,5 +618,5 @@ module.exports = {
   info: { id: PLUGIN_ID, name: 'Your Own Music Source', description: 'A private, multi-provider-ready account-backed and local-file music source for SillyTavern.' },
   init,
   exit,
-  _test: { normalizeCookie, stableLocalId, normalizeSearch, searchLocal, inspectLocalDirectory, extractPlaylistId, extractFirstHttpUrl, scoreTrackMatch, findHighConfidenceLocalMatch, searchProviderTracks, normalizeProvider, limitPlaylistTracks, findPlaylistArray, isPlaylistLikeItem, normalizeAccountPlaylist },
+  _test: { normalizeCookie, stableLocalId, normalizeSearch, searchLocal, inspectLocalDirectory, extractPlaylistId, extractFirstHttpUrl, scoreTrackMatch, findHighConfidenceLocalMatch, searchProviderTracks, extractQrKey, extractQrPayload, normalizeQrImage, makeNeteaseQrPayload, normalizeProvider, limitPlaylistTracks, findPlaylistArray, isPlaylistLikeItem, normalizeAccountPlaylist },
 };
