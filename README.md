@@ -200,3 +200,13 @@ Termux:  /data/data/com.termux/files/home/storage/music
 - `/auth/status`、`/auth/qr/start`、`/auth/qr/check`
 
 仅供个人合法使用。请遵守音乐平台服务条款与所在地法律；不要公开分享 Cookie，也不要把接口暴露为公共音乐服务。
+
+
+## 1.7.2 更新公告
+
+- 修复 TauriTavern 将 `index.html` 当作二维码接口成功回传时的误报；现在会明确提示后端暂未适配。
+- 工具页新增 TauriTavern 兼容说明，列出当前可用范围与限制。
+- 悬浮歌词增加“固定歌词位置”和“歌词点击穿透”两个独立开关，默认关闭。
+- 两个开关均可单独使用：固定位置关闭拖动，点击穿透不拦截下方界面。
+
+> TauriTavern 目前可以加载本插件前端，但本插件所需的后端暂未适配。因此 TT 中暂不可用网易云 / QQ 音乐登录、二维码、在线曲库和本地音乐后端功能；普通 SillyTavern 用户不受影响。

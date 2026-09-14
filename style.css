@@ -819,3 +819,14 @@
 .npms-player-style-tools .npms-style-file-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px !important; align-content: start; height: 54px; margin: 0 !important; }
 .npms-player-style-tools .npms-style-file-actions .menu_button { width: 100%; min-height: 54px !important; height: 54px !important; padding: 4px 8px !important; font-size: .78rem !important; }
 @media (max-width: 560px) { .npms-player-style-tools { grid-template-columns: 1fr; } .npms-player-style-tools .npms-style-file-actions { height: 36px; } .npms-player-style-tools .npms-style-file-actions .menu_button { min-height: 36px !important; height: 36px !important; } }
+
+
+/* Optional lyric interaction modes and TT diagnostics. */
+.npms-floating-player.is-fixed-position .npms-floating-lyrics-display { cursor: pointer; }
+.npms-floating-player.is-pointer-passthrough .npms-floating-lyrics-display { pointer-events: none !important; }
+.npms-contract { margin: 0; padding: 12px; border-left: 2px solid var(--npms-line); background: var(--npms-wash); color: var(--npms-ink); font: .75rem/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+
+
+.npms-tt-backend-card .npms-status { margin-bottom: 10px; }
+.npms-tt-steps { margin: 8px 0 12px; }
+.npms-tt-steps li { margin: 4px 0; }
