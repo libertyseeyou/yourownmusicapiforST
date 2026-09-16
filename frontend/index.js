@@ -410,10 +410,10 @@ function renderListeningStatsPanel() {
     const list = document.createElement('div'); list.className = 'npms-listening-stats-list';
     rows.forEach((row, index) => {
         const item = document.createElement('div'); item.className = `npms-listening-stat-row${row.isUser ? ' is-user' : ''}`;
-        const rank = document.createElement('b'); rank.className = 'npms-listening-rank'; rank.textContent = row.isUser ? '榜一' : String(index + 1); item.append(rank);
+        const rank = document.createElement('b'); rank.className = 'npms-listening-rank'; rank.textContent = String(index + 1); item.append(rank);
         const img = document.createElement('img'); img.className = 'npms-listening-avatar'; img.alt = ''; img.src = row.avatar || 'img/user-default.png'; img.onerror = () => { img.src = 'img/user-default.png'; }; item.append(img);
         const body = document.createElement('div'); body.className = 'npms-listening-stat-body';
-        const name = document.createElement('span'); name.className = 'npms-listening-name'; name.textContent = row.isUser ? `${row.name} · user` : row.name; body.append(name);
+        const name = document.createElement('span'); name.className = 'npms-listening-name'; name.textContent = row.name; body.append(name);
         const time = document.createElement('small'); time.className = 'npms-listening-time'; time.textContent = formatListeningTime(row.seconds); body.append(time); item.append(body); list.append(item);
     });
     panel.append(list);
