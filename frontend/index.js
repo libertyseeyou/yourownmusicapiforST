@@ -1,4 +1,4 @@
-import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
+import { getRequestHeaders, saveSettingsDebounced, characters, this_chid, name1, name2, user_avatar, getThumbnailUrl } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 
 const EXTENSION_ID = 'netease-personal-music-source';
@@ -23,6 +23,7 @@ const DEFAULTS = {
     floatingPlayerTheme: 'dark',
     floatingPlayerStyleMode: 'preset',
     floatingPlayerCustomCss: '',
+    listeningStats: { userSeconds: 0, characters: {} },
 };
 const REQUEST_TIMEOUT_MS = 20000;
 const TERMUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-termux.sh | bash';
@@ -53,6 +54,16 @@ const state = {
         lyrics: [],
         lyricIndex: -1,
         lyricRequestId: 0,
+        wasPlayingBeforeHidden: false,
+        lastKnownTime: 0,
+        lastKnownAt: 0,
+        recoveryTimer: null,
+        recoveryInProgress: false,
+        recoveryAttempts: 0,
+        lastRecoveryAt: 0,
+        endedAt: 0,
+        listenStatTime: null,
+        listenStatPending: 0,
     },
 };
 
@@ -322,6 +333,100 @@ async function checkQrLogin() {
         setStatus(`扫码检查失败：${error.message}`, 'error');
         stopQrPolling();
     }
+}
+
+function listeningStats() {
+    const config = settings();
+    if (!config.listeningStats || typeof config.listeningStats !== 'object') config.listeningStats = { userSeconds: 0, characters: {} };
+    if (!Number.isFinite(Number(config.listeningStats.userSeconds))) config.listeningStats.userSeconds = 0;
+    if (!config.listeningStats.characters || typeof config.listeningStats.characters !== 'object') config.listeningStats.characters = {};
+    return config.listeningStats;
+}
+
+function currentListeningCharacter() {
+    const id = this_chid;
+    const character = id !== undefined && characters?.[id] ? characters[id] : null;
+    const name = String(character?.name || name2 || '').trim();
+    if (!name || name === 'SillyTavern') return null;
+    const key = character ? `character:${String(id)}` : `character:name:${name}`;
+    let avatar = '';
+    if (character?.avatar && character.avatar !== 'none') {
+        try { avatar = getThumbnailUrl('avatar', character.avatar); } catch {}
+    }
+    return { key, name, avatar };
+}
+
+function currentListeningUser() {
+    let avatar = '';
+    try { avatar = getThumbnailUrl('persona', user_avatar); } catch {}
+    return { name: String(name1 || 'user'), avatar };
+}
+
+function recordListeningProgress(force = false) {
+    const audio = state.player.audio;
+    if (!audio || (!force && audio.paused) || !Number.isFinite(audio.currentTime)) return;
+    const current = audio.currentTime;
+    if (state.player.listenStatTime === null || state.player.listenStatTime === undefined) {
+        state.player.listenStatTime = current;
+        return;
+    }
+    const delta = current - state.player.listenStatTime;
+    state.player.listenStatTime = current;
+    if (delta <= 0 || delta > 10) return;
+    const stats = listeningStats();
+    stats.userSeconds += delta;
+    const character = currentListeningCharacter();
+    if (character) {
+        const item = stats.characters[character.key] ||= { name: character.name, avatar: character.avatar, seconds: 0 };
+        item.name = character.name;
+        if (character.avatar) item.avatar = character.avatar;
+        item.seconds += delta;
+    }
+    state.player.listenStatPending += delta;
+    if (state.player.listenStatPending >= 10) {
+        state.player.listenStatPending = 0;
+        saveSettingsDebounced();
+        renderListeningStatsPanel();
+    }
+}
+
+function formatListeningTime(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    if (hours) return `${hours}小时${minutes}分`;
+    if (minutes) return `${minutes}分${total % 60}秒`;
+    return `${total % 60}秒`;
+}
+
+function renderListeningStatsPanel() {
+    const panel = document.querySelector('#npms_listening_stats_panel');
+    if (!panel) return;
+    const stats = listeningStats();
+    const user = currentListeningUser();
+    const rows = [{ key: 'user', name: user.name, avatar: user.avatar, seconds: stats.userSeconds, isUser: true }, ...Object.entries(stats.characters).map(([key, value]) => ({ key, ...value }))].sort((a, b) => (b.isUser ? 1 : 0) - (a.isUser ? 1 : 0) || Number(b.seconds || 0) - Number(a.seconds || 0));
+    panel.replaceChildren();
+    const heading = document.createElement('div'); heading.className = 'npms-listening-stats-heading'; heading.textContent = '听歌排行榜'; panel.append(heading);
+    const list = document.createElement('div'); list.className = 'npms-listening-stats-list';
+    rows.forEach((row, index) => {
+        const item = document.createElement('div'); item.className = `npms-listening-stat-row${row.isUser ? ' is-user' : ''}`;
+        const rank = document.createElement('b'); rank.className = 'npms-listening-rank'; rank.textContent = row.isUser ? '榜一' : String(index + 1); item.append(rank);
+        const img = document.createElement('img'); img.className = 'npms-listening-avatar'; img.alt = ''; img.src = row.avatar || 'img/user-default.png'; img.onerror = () => { img.src = 'img/user-default.png'; }; item.append(img);
+        const body = document.createElement('div'); body.className = 'npms-listening-stat-body';
+        const name = document.createElement('span'); name.className = 'npms-listening-name'; name.textContent = row.isUser ? `${row.name} · user` : row.name; body.append(name);
+        const time = document.createElement('small'); time.className = 'npms-listening-time'; time.textContent = formatListeningTime(row.seconds); body.append(time); item.append(body); list.append(item);
+    });
+    panel.append(list);
+    const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'menu_button npms-listening-clear'; clear.textContent = '清空统计'; clear.addEventListener('click', () => { if (!window.confirm('清空全部听歌统计？')) return; settings().listeningStats = { userSeconds: 0, characters: {} }; saveSettingsDebounced(); renderListeningStatsPanel(); }); panel.append(clear);
+}
+
+function toggleListeningStatsPanel() {
+    const panel = document.querySelector('#npms_listening_stats_panel');
+    const button = document.querySelector('#npms_listening_stats_toggle');
+    if (!panel || !button) return;
+    panel.hidden = !panel.hidden;
+    button.setAttribute('aria-expanded', String(!panel.hidden));
+    if (!panel.hidden) renderListeningStatsPanel();
 }
 
 function playerElements() {
@@ -790,6 +895,41 @@ function ensureFloatingLyrics() {
     return root;
 }
 
+let floatingLyricResizeObserver = null;
+let floatingLyricMeasureFrame = 0;
+
+function measureFloatingLyricOverflow(root) {
+    if (!root) return;
+    const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    root.querySelectorAll('.npms-floating-lyric-line > span, .npms-floating-lyric-line > small').forEach(node => {
+        node.classList.remove('is-overflowing');
+        node.style.removeProperty('--npms-lyric-scroll-distance');
+        node.style.removeProperty('--npms-lyric-scroll-duration');
+        if (reducedMotion) return;
+        const distance = Math.ceil(node.scrollWidth - node.clientWidth);
+        if (distance <= 2) return;
+        node.style.setProperty('--npms-lyric-scroll-distance', `${-distance}px`);
+        node.style.setProperty('--npms-lyric-scroll-duration', `${Math.max(6, Math.min(18, 5 + distance / 28)).toFixed(2)}s`);
+        node.classList.add('is-overflowing');
+    });
+}
+
+function scheduleFloatingLyricOverflowMeasure(root) {
+    if (!root) return;
+    if (floatingLyricMeasureFrame) cancelAnimationFrame(floatingLyricMeasureFrame);
+    floatingLyricMeasureFrame = requestAnimationFrame(() => {
+        floatingLyricMeasureFrame = 0;
+        measureFloatingLyricOverflow(root);
+    });
+}
+
+function observeFloatingLyricSize(root) {
+    if (!root || floatingLyricResizeObserver || typeof ResizeObserver === 'undefined') return;
+    floatingLyricResizeObserver = new ResizeObserver(() => scheduleFloatingLyricOverflowMeasure(root));
+    const display = root.querySelector('.npms-floating-lyrics-display');
+    if (display) floatingLyricResizeObserver.observe(display);
+}
+
 function renderFloatingLyrics(index) {
     const root = ensureFloatingLyrics();
     if (!root) return;
@@ -811,6 +951,8 @@ function renderFloatingLyrics(index) {
     }
     applyIsolatedFloatingStyles(root);
     lines.classList.remove('is-advancing'); void lines.offsetWidth; lines.classList.add('is-advancing');
+    observeFloatingLyricSize(root);
+    scheduleFloatingLyricOverflowMeasure(root);
     updateFloatingPlayerControls(root);
 }
 
@@ -942,17 +1084,116 @@ async function loadCurrentTrackLyrics(track) {
     } catch { /* Lyrics are optional and must never block playback. */ }
 }
 
+function savePlaybackSnapshot() {
+    const audio = state.player.audio;
+    const track = currentPlayerTrack();
+    if (!audio || !track) return;
+    state.player.lastKnownTime = Number.isFinite(audio.currentTime) ? audio.currentTime : state.player.lastKnownTime;
+    state.player.lastKnownAt = Date.now();
+    state.player.wasPlayingBeforeHidden = !audio.paused && !audio.ended;
+}
+
+function scheduleAudioRecovery(reason = '音频流停滞') {
+    const audio = state.player.audio;
+    const track = currentPlayerTrack();
+    if (!audio || !track || audio.paused || audio.ended || state.player.recoveryInProgress) return;
+    const now = Date.now();
+    if (now - state.player.lastRecoveryAt < 12000) return;
+    if (state.player.recoveryAttempts >= 3) {
+        appendFeedback('后台播放恢复已暂停', { reason, hint: '连续恢复失败，请回到页面后手动点击播放。' }, false);
+        return;
+    }
+    if (state.player.recoveryTimer) return;
+    state.player.recoveryTimer = setTimeout(() => {
+        state.player.recoveryTimer = null;
+        void recoverAudioStream(reason);
+    }, document.visibilityState === 'visible' ? 900 : 2500);
+}
+
+async function recoverAudioStream(reason = '音频流停滞') {
+    const audio = state.player.audio;
+    const track = currentPlayerTrack();
+    if (!audio || !track || audio.ended || state.player.recoveryInProgress) return;
+    state.player.recoveryInProgress = true;
+    state.player.recoveryAttempts += 1;
+    state.player.lastRecoveryAt = Date.now();
+    const position = Number.isFinite(audio.currentTime) ? audio.currentTime : state.player.lastKnownTime || 0;
+    const shouldResume = !audio.paused || state.player.wasPlayingBeforeHidden;
+    try {
+        const url = await resolvePlayerTrackUrl(track);
+        if (track !== currentPlayerTrack()) return;
+        audio.src = url;
+        audio.load();
+        await new Promise((resolve, reject) => {
+            const onReady = () => { cleanup(); resolve(); };
+            const onError = () => { cleanup(); reject(new Error('重新加载音频失败')); };
+            const cleanup = () => { audio.removeEventListener('loadedmetadata', onReady); audio.removeEventListener('error', onError); };
+            audio.addEventListener('loadedmetadata', onReady, { once: true });
+            audio.addEventListener('error', onError, { once: true });
+            setTimeout(() => { cleanup(); reject(new Error('重新加载音频超时')); }, 12000);
+        });
+        if (Number.isFinite(audio.duration) && position > 0) audio.currentTime = Math.min(position, Math.max(0, audio.duration - .2));
+        if (shouldResume && document.visibilityState !== 'hidden') await audio.play();
+        appendFeedback('音频流已自动恢复', { reason, track: track.name, position: Math.round(position), attempt: state.player.recoveryAttempts }, true);
+        state.player.recoveryAttempts = 0;
+        setStatus(`已恢复播放：${track.name}`, 'ok');
+    } catch (error) {
+        appendFeedback('音频流恢复失败', { reason, attempt: state.player.recoveryAttempts, error: error.message }, false);
+        if (state.player.recoveryAttempts < 3) scheduleAudioRecovery(reason);
+    } finally {
+        state.player.recoveryInProgress = false;
+        renderMiniPlayer();
+    }
+}
+
+function reconcileBackgroundPlayback() {
+    const audio = state.player.audio;
+    if (!audio) return;
+    if (audio.ended && state.player.tracks.length && state.player.endedAt !== audio.currentTime) {
+        state.player.endedAt = audio.currentTime;
+        if (state.player.mode === 'one') {
+            audio.currentTime = 0;
+            void audio.play().catch(error => playerFailure('单曲重播失败', error));
+        } else {
+            void playPlayerOffset(1, true);
+        }
+        return;
+    }
+    if (!audio.paused && audio.readyState < 3) scheduleAudioRecovery('回到前台后检测到音频未推进');
+    state.player.wasPlayingBeforeHidden = false;
+}
+
+function installBackgroundPlaybackHooks() {
+    if (installBackgroundPlaybackHooks.done) return;
+    installBackgroundPlaybackHooks.done = true;
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') savePlaybackSnapshot();
+        else { reconcileBackgroundPlayback();  }
+    });
+    window.addEventListener('pageshow', () => { reconcileBackgroundPlayback();  });
+}
+
 function ensureMiniAudio() {
     if (state.player.audio) return state.player.audio;
     const audio = new Audio();
-    audio.preload = 'none';
+    audio.preload = 'auto';
+    audio.setAttribute('playsinline', '');
     audio.volume = 0.6;
-    audio.addEventListener('play', renderMiniPlayer);
-    audio.addEventListener('pause', renderMiniPlayer);
+    installBackgroundPlaybackHooks();
+    audio.addEventListener('play', () => { state.player.recoveryAttempts = 0;   renderMiniPlayer(); });
+    audio.addEventListener('pause', () => { recordListeningProgress(true); savePlaybackSnapshot();  renderMiniPlayer(); });
     audio.addEventListener('loadedmetadata', updatePlayerProgress);
     audio.addEventListener('durationchange', updatePlayerProgress);
-    audio.addEventListener('timeupdate', () => { updatePlayerProgress(); renderCurrentLyric(); });
+    audio.addEventListener('timeupdate', () => { recordListeningProgress(); state.player.lastKnownTime = audio.currentTime; state.player.lastKnownAt = Date.now(); updatePlayerProgress(); renderCurrentLyric(); });
+    audio.addEventListener('progress', () => { state.player.recoveryAttempts = 0; });
+    audio.addEventListener('canplay', () => { state.player.recoveryAttempts = 0;  });
+    audio.addEventListener('waiting', () => scheduleAudioRecovery('音频缓冲等待'));
+    audio.addEventListener('stalled', () => scheduleAudioRecovery('音频流停滞'));
+    audio.addEventListener('suspend', () => { if (!audio.paused && !audio.ended) scheduleAudioRecovery('浏览器暂停读取音频流'); });
     audio.addEventListener('ended', () => {
+        recordListeningProgress(true);
+        state.player.listenStatTime = null;
+        state.player.endedAt = audio.currentTime;
         if (state.player.mode === 'one') {
             audio.currentTime = 0;
             audio.play().catch(error => playerFailure('单曲重播失败', error));
@@ -962,7 +1203,8 @@ function ensureMiniAudio() {
     });
     audio.addEventListener('error', () => {
         const code = audio.error?.code;
-        playerFailure('音频播放错误', new Error(code ? `浏览器媒体错误代码 ${code}` : '浏览器无法播放该音源'));
+        if (!audio.paused && !audio.ended) scheduleAudioRecovery(code ? `浏览器媒体错误代码 ${code}` : '浏览器无法播放该音源');
+        else playerFailure('音频播放错误', new Error(code ? `浏览器媒体错误代码 ${code}` : '浏览器无法播放该音源'));
     });
     state.player.audio = audio;
     return audio;
@@ -985,13 +1227,19 @@ function updatePlayerProgress() {
     updateFloatingPlayerControls();
 }
 
-function seekMiniPlayer(event) {
+function seekMiniPlayerAt(track, clientX) {
     const audio = state.player.audio;
-    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return false;
+    const rect = track.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     audio.currentTime = ratio * audio.duration;
     updatePlayerProgress();
+    renderCurrentLyric(true);
+    return true;
+}
+
+function seekMiniPlayer(event) {
+    seekMiniPlayerAt(event.currentTarget, event.clientX);
 }
 
 function setMiniPlayerVolume(event) {
@@ -1033,6 +1281,7 @@ async function playPlayerIndex(index, autoplay = true) {
         audio.load();
         state.player.loading = false;
         renderMiniPlayer();
+        state.player.recoveryAttempts = 0;
         if (autoplay) {
             await audio.play();
             setStatus(`正在播放：${track.name}`, 'ok');
@@ -1477,7 +1726,8 @@ function panelHtml() {
 <article class="npms-deploy-card"><header><b>macOS</b><small>TERMINAL</small></header><textarea id="npms_install_command_macos" data-install-command="${MACOS_INSTALL_COMMAND}" data-remove-command="${MACOS_REMOVE_BACKEND_COMMAND}" rows="3" readonly>${MACOS_INSTALL_COMMAND}</textarea><button id="npms_copy_install_macos" class="menu_button">复制安装 / 更新命令</button></article>
 <article class="npms-deploy-card"><header><b>Linux</b><small>CLOUD · DOCKER</small></header><textarea id="npms_install_command_linux" data-install-command="${LINUX_INSTALL_COMMAND}" data-remove-command="${LINUX_REMOVE_BACKEND_COMMAND}" rows="3" readonly>${LINUX_INSTALL_COMMAND}</textarea><button id="npms_copy_install_linux" class="menu_button">复制安装 / 更新命令</button></article></div><ol class="npms-steps"><li>需要 Node.js 20+ 与 npm。</li><li>找不到酒馆时通过 <code>ST_DIR</code> 指定路径。</li><li>命令执行完成后，请自行重启 SillyTavern。</li></ol></section>
 
- <section class="npms-page" data-npms-page="tools" hidden><div class="npms-section-heading"><span>05</span><div><b>工具与记录</b><small>接口、播放器适配和后端回传。</small></div></div><details class="npms-detail-card"><summary><b>播放器接入接口</b><span>API</span></summary><div class="npms-detail-body"><div class="npms-api-list"><code>GET ${api}/?types=search&amp;name=歌名%20歌手</code><span>搜索</span><code>GET ${api}/?types=url&amp;id=歌曲ID</code><span>播放</span><code>GET ${api}/?types=lyric&amp;id=歌曲ID</code><span>歌词</span><code>GET ${api}/input/resolve?provider=qq|netease&amp;input=...</code><span>统一解析</span><code>GET ${api}/account/playlists?provider=netease|qq</code><span>账号歌单目录</span><code>GET ${api}/account/playlist/歌单ID?provider=...&amp;limit=300</code><span>按需载入，硬上限 500 首</span><code>GET ${api}/local/list</code><span>本地列表</span><code>GET ${api}/health</code><span>后端状态</span></div><button id="npms_copy_api" class="menu_button">复制接口基址</button></div></details><details class="npms-detail-card"><summary><b>适配现有酒馆助手播放器</b><span>ADAPTER</span></summary><div class="npms-detail-body"><p class="npms-help">只创建适配副本，永不覆盖原脚本。</p><button id="npms_scan_scripts" class="menu_button">扫描播放器脚本</button><div id="npms_script_candidates" class="npms-script-candidates"><span class="npms-muted">尚未扫描。</span></div></div></details><details class="npms-detail-card npms-tt-backend-card"><summary><b>TT 兼容说明</b><span>暂未适配</span></summary><div class="npms-detail-body"><div class="npms-status" data-kind="warn">TauriTavern 后端暂未适配</div><p class="npms-help"><b>给 TauriTavern 用户：</b>本插件目前可以加载前端界面，但 TT 暂未提供本插件所需的后端运行环境。</p><p class="npms-help">因此以下功能暂不可用：</p><ul class="npms-steps npms-tt-steps"><li>网易云 / QQ 音乐 Cookie 登录</li><li>二维码登录</li><li>在线搜索、歌单、歌词和播放地址</li><li>本地音乐扫描与后端 Range 播放</li></ul><p class="npms-help">这不是你的安装问题。普通 SillyTavern 用户不受影响；后续完成 TT 原生后端适配后，再恢复这些功能。</p></div></details>
+ <section class="npms-page" data-npms-page="tools" hidden><div class="npms-section-heading npms-tools-heading"><span>05</span><div><b>工具与记录</b><small>接口、播放器适配和后端回传。</small></div><button id="npms_listening_stats_toggle" class="npms-listening-stats-toggle" type="button" aria-label="听歌排行榜" aria-expanded="false">◌</button></div><details class="npms-detail-card"><summary><b>播放器接入接口</b><span>API</span></summary><div class="npms-detail-body"><div class="npms-api-list"><code>GET ${api}/?types=search&amp;name=歌名%20歌手</code><span>搜索</span><code>GET ${api}/?types=url&amp;id=歌曲ID</code><span>播放</span><code>GET ${api}/?types=lyric&amp;id=歌曲ID</code><span>歌词</span><code>GET ${api}/input/resolve?provider=qq|netease&amp;input=...</code><span>统一解析</span><code>GET ${api}/account/playlists?provider=netease|qq</code><span>账号歌单目录</span><code>GET ${api}/account/playlist/歌单ID?provider=...&amp;limit=300</code><span>按需载入，硬上限 500 首</span><code>GET ${api}/local/list</code><span>本地列表</span><code>GET ${api}/health</code><span>后端状态</span></div><button id="npms_copy_api" class="menu_button">复制接口基址</button></div></details><details class="npms-detail-card"><summary><b>适配现有酒馆助手播放器</b><span>ADAPTER</span></summary><div class="npms-detail-body"><p class="npms-help">只创建适配副本，永不覆盖原脚本。</p><button id="npms_scan_scripts" class="menu_button">扫描播放器脚本</button><div id="npms_script_candidates" class="npms-script-candidates"><span class="npms-muted">尚未扫描。</span></div></div></details><div id="npms_listening_stats_panel" class="npms-listening-stats-panel" hidden></div>
+<details class="npms-detail-card npms-tt-backend-card"><summary><b>TT 兼容说明</b><span>暂未适配</span></summary><div class="npms-detail-body"><div class="npms-status" data-kind="warn">TauriTavern 后端暂未适配</div><p class="npms-help"><b>给 TauriTavern 用户：</b>本插件目前可以加载前端界面，但 TT 暂未提供本插件所需的后端运行环境。</p><p class="npms-help">因此以下功能暂不可用：</p><ul class="npms-steps npms-tt-steps"><li>网易云 / QQ 音乐 Cookie 登录</li><li>二维码登录</li><li>在线搜索、歌单、歌词和播放地址</li><li>本地音乐扫描与后端 Range 播放</li></ul><p class="npms-help">这不是你的安装问题。普通 SillyTavern 用户不受影响；后续完成 TT 原生后端适配后，再恢复这些功能。</p></div></details>
 <details class="npms-detail-card" open><summary><b>后端回传与操作记录</b><span>LOG</span></summary><div class="npms-detail-body"><div id="npms_feedback" class="npms-feedback"></div></div></details></section>
  </div></div></div>`;
 }
@@ -1509,6 +1759,7 @@ function bind() {
         });
     }));
     root.querySelectorAll('[data-provider]').forEach(button => button.addEventListener('click', () => switchProvider(button.dataset.provider)));
+    root.querySelector('#npms_listening_stats_toggle')?.addEventListener('click', toggleListeningStatsPanel);
     root.querySelector('#npms_refresh').addEventListener('click', refreshStatus);
     root.querySelector('#npms_qr_start').addEventListener('click', startQrLogin);
     root.querySelector('#npms_qr_cancel').addEventListener('click', () => { stopQrPolling(); root.querySelector('#npms_qr_box').hidden = true; setStatus('已取消扫码'); });
@@ -1543,9 +1794,42 @@ function bind() {
     root.querySelector('#npms_player_play').addEventListener('click', toggleMiniPlayer);
     root.querySelector('#npms_player_next').addEventListener('click', () => playPlayerOffset(1, true));
     root.querySelector('#npms_player_mode').addEventListener('click', cyclePlayerMode);
-    root.querySelector('#npms_player_progress_track').addEventListener('click', seekMiniPlayer);
+    const progressTrack = root.querySelector('#npms_player_progress_track');
+    let progressDrag = null;
+    progressTrack.addEventListener('pointerdown', event => {
+        if (event.button !== undefined && event.button !== 0) return;
+        if (!seekMiniPlayerAt(progressTrack, event.clientX)) return;
+        progressDrag = { id: event.pointerId, moved: false };
+        progressTrack.setPointerCapture?.(event.pointerId);
+        progressTrack.classList.add('is-dragging');
+        event.preventDefault();
+    });
+    progressTrack.addEventListener('pointermove', event => {
+        if (!progressDrag || progressDrag.id !== event.pointerId) return;
+        if (Math.abs(event.movementX || 0) + Math.abs(event.movementY || 0) > 1) progressDrag.moved = true;
+        seekMiniPlayerAt(progressTrack, event.clientX);
+        event.preventDefault();
+    });
+    const finishProgressDrag = event => {
+        if (!progressDrag || progressDrag.id !== event.pointerId) return;
+        const moved = progressDrag.moved;
+        progressDrag = null;
+        progressTrack.classList.remove('is-dragging');
+        try { progressTrack.releasePointerCapture?.(event.pointerId); } catch {}
+        if (moved) progressTrack.dataset.suppressClick = 'true';
+    };
+    progressTrack.addEventListener('pointerup', finishProgressDrag);
+    progressTrack.addEventListener('pointercancel', finishProgressDrag);
+    progressTrack.addEventListener('click', event => {
+        if (progressTrack.dataset.suppressClick === 'true') {
+            progressTrack.dataset.suppressClick = 'false';
+            event.preventDefault();
+            return;
+        }
+        seekMiniPlayer(event);
+    });
     root.querySelector('#npms_player_volume').addEventListener('input', setMiniPlayerVolume);
-    window.addEventListener('resize', resetPlayerMarquee, { passive: true });
+    window.addEventListener('resize', () => { resetPlayerMarquee(); scheduleFloatingLyricOverflowMeasure(document.querySelector('#npms_floating_lyrics')); }, { passive: true });
     root.querySelector('#npms_logout').addEventListener('click', logout);
     root.querySelector('#npms_rescan').addEventListener('click', rescan);
     root.querySelector('#npms_dir_inspect').addEventListener('click', inspectLocalDir);
@@ -1591,6 +1875,7 @@ if (document.readyState === 'loading') {
 }
 
 window.addEventListener('beforeunload', () => {
+    savePlaybackSnapshot();
     stopQrPolling();
     if (state.player.audio) {
         state.player.audio.pause();
