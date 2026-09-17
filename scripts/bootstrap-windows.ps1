@@ -1,30 +1,18 @@
 ﻿param([string]$STDir = $env:ST_DIR)
-
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$Branch = if ($env:NPMS_BRANCH) { $env:NPMS_BRANCH } else { 'main' }
-$WorkDirectory = Join-Path ([IO.Path]::GetTempPath()) "npms-install-$PID-$(Get-Date -Format yyyyMMddHHmmss)"
-$ZipPath = Join-Path $WorkDirectory 'source.zip'
-$ZipUrl = "https://github.com/libertyseeyou/yourownmusicapiforST/archive/refs/heads/$Branch.zip"
-
-# Windows PowerShell 5.1 defaults to GBK for irm|iex. Force UTF-8 output so Chinese text is readable.
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-
-Write-Host '== Your Own Music Source: Windows bootstrap ==' -ForegroundColor Cyan
+$Branch = if ($env:NPMS_BRANCH) { $env:NPMS_BRANCH } else { 'main' }
+$RepoUrl = if ($env:NPMS_REPO_URL) { $env:NPMS_REPO_URL } else { 'https://github.com/libertyseeyou/yourownmusicapiforST.git' }
+$WorkDirectory = Join-Path ([IO.Path]::GetTempPath()) "npms-install-$PID-$(Get-Date -Format yyyyMMddHHmmss)"
+if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) { throw 'Git is required. Install Git for Windows, reopen PowerShell, and retry.' }
 try {
-    New-Item -ItemType Directory -Force -Path $WorkDirectory | Out-Null
-    Write-Host 'Downloading installer from GitHub...'
-    Invoke-WebRequest -UseBasicParsing -Uri $ZipUrl -OutFile $ZipPath
-    Expand-Archive -LiteralPath $ZipPath -DestinationPath $WorkDirectory -Force
-    $Repository = Get-ChildItem -LiteralPath $WorkDirectory -Directory | Where-Object {
-        Test-Path -LiteralPath (Join-Path $_.FullName 'scripts\install-windows.ps1')
-    } | Select-Object -First 1
-    if (-not $Repository) { throw 'The downloaded archive does not contain scripts\install-windows.ps1.' }
+    Write-Host '== Your Own Music Source: Git backend installer ==' -ForegroundColor Cyan
+    & git.exe clone --depth 1 --branch $Branch $RepoUrl $WorkDirectory
+    if ($LASTEXITCODE -ne 0) { throw "git clone failed with exit code $LASTEXITCODE" }
     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
-    & (Join-Path $Repository.FullName 'scripts\install-windows.ps1') -STDir $STDir
+    & (Join-Path $WorkDirectory 'scripts\install-windows.ps1') -STDir $STDir
 } finally {
-    if (Test-Path -LiteralPath $WorkDirectory) {
-        Remove-Item -LiteralPath $WorkDirectory -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    if (Test-Path -LiteralPath $WorkDirectory) { Remove-Item -LiteralPath $WorkDirectory -Recurse -Force -ErrorAction SilentlyContinue }
 }

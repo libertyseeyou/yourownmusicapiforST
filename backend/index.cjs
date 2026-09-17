@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const childProcess = require('node:child_process');
 
 const PLUGIN_ID = 'netease-personal-music-source';
 const ROOT = __dirname;
@@ -11,6 +12,13 @@ const COOKIE_FILE = path.join(DATA_DIR, 'cookie.txt');
 const QQ_COOKIE_FILE = path.join(DATA_DIR, 'qq-cookie.txt');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const DEFAULT_LOCAL_DIR = path.join(DATA_DIR, 'local-music');
+const BACKEND_VERSION = require('./package.json').version;
+const REPOSITORY_ROOT = path.resolve(ROOT, '..');
+const AUTO_UPDATE_READY = fs.existsSync(path.join(REPOSITORY_ROOT, '.git'));
+let GIT_COMMIT = '';
+if (AUTO_UPDATE_READY) {
+  try { GIT_COMMIT = childProcess.execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPOSITORY_ROOT, encoding: 'utf8', timeout: 3000 }).trim(); } catch { /* Git metadata is diagnostic only. */ }
+}
 const MAX_PLAYLIST_TRACKS = 500;
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.m4a', '.wav', '.ogg', '.aac', '.webm', '.opus']);
 const MIME_TYPES = {
@@ -559,7 +567,8 @@ async function init(router) {
 
   router.get('/', asyncRoute(legacyHandler));
   router.get('/health', async (_req, res) => res.json({
-    ok: true, plugin: PLUGIN_ID, version: '1.5.1', providers: ['netease','qq'], hasCookie: Boolean(userCookie),
+    ok: true, plugin: PLUGIN_ID, version: BACKEND_VERSION, providers: ['netease','qq'], hasCookie: Boolean(userCookie),
+    installMode: AUTO_UPDATE_READY ? 'git' : 'copied', autoUpdateReady: AUTO_UPDATE_READY, commit: GIT_COMMIT,
     localTracks: localTracks.length, localMusicDir: config.localMusicDir,
   }));
   router.get('/auth/status', asyncRoute(async (req, res) => res.json(await getLoginStatus(req.query.provider))));

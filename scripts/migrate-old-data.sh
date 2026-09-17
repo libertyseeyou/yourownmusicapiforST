@@ -2,7 +2,7 @@
 set -euo pipefail
 ST_DIR="${ST_DIR:-$HOME/SillyTavern}"
 OLD_DIR="${OLD_MUSIC_API_DIR:-$HOME/music-api}"
-NEW_DATA="$ST_DIR/plugins/netease-personal-music-source/data"
+NEW_DATA="$ST_DIR/plugins/netease-personal-music-source/backend/data"
 [ -d "$NEW_DATA" ] || { echo '请先安装插件。' >&2; exit 1; }
 if [ -s "$OLD_DIR/cookie.txt" ]; then
   cp "$OLD_DIR/cookie.txt" "$NEW_DATA/cookie.txt"

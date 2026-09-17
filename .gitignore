@@ -10,3 +10,6 @@ backend/data/*cookie*.txt
 backend/data/local-music/*
 !backend/data/local-music/.gitkeep
 sillytavern-music-source-backups/
+!backend/data/.gitkeep
+backend/node_modules/
+backend/node_modules/.npms-lock-hash

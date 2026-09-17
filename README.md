@@ -1,4 +1,4 @@
-# 你自己的音乐源 1.7.1
+# 你自己的音乐源 1.8.0
 
 作者：**灯灯&提提**
 
@@ -78,6 +78,24 @@ curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/
 
 本地仓库：`bash scripts/install-termux.sh`
 
+## 后端自动更新与一次性迁移
+
+从 1.8.0 开始，后端目录是完整 Git 仓库。旧版本用户需要再运行一次当前平台的部署命令：
+
+1. 安装器备份原后端；
+2. 暂存并恢复 Cookie、QQ Cookie、配置与本地目录设置；
+3. 将本仓库克隆到 `SillyTavern/plugins/netease-personal-music-source/`；
+4. 安装后端依赖；
+5. 开启 SillyTavern Server Plugin 自动更新。
+
+迁移完成后：
+
+```text
+发布后端更新 → 完整重启 SillyTavern → 酒馆自动 git pull → 加载新后端
+```
+
+仅刷新网页不会重载 Server Plugin，包含后端更新时必须完整重启酒馆。
+
 ## Windows / PowerShell（Beta）
 
 推荐使用 **PowerShell 7**（`pwsh`）。Windows 自带的 PowerShell 5.1 默认按系统代码页（常见为 GBK）解析远程脚本，`irm | iex` 时中文提示容易显示成乱码，看起来像“装不上”。安装命令本身没有问题。
@@ -140,7 +158,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $script
 3. 在扩展里打开「你自己的音乐源」，点「刷新状态」。
 4. 后端版本应显示 `1.5.2`。
 
-安装器只复制前后端并执行 `npm install`，**不会自动重启酒馆**。
+安装器会把后端迁移为 Git 仓库并执行首次依赖安装，**不会自动重启酒馆**。完成这一次迁移后，后续后端更新由 SillyTavern 在启动时自动拉取。
 
 ### 常见问题
 
@@ -222,7 +240,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1
 私密数据位于：
 
 ```text
-SillyTavern/plugins/netease-personal-music-source/data/
+SillyTavern/plugins/netease-personal-music-source/backend/data/
 ```
 
 包含网易云 Cookie、QQ Cookie、本地音乐目录设置与配置。升级时会保留该目录。默认备份位于：
@@ -279,3 +297,14 @@ Termux:  /data/data/com.termux/files/home/storage/music
 - 工具页加入听歌排行榜彩蛋，按 user 总时长和各角色聊天中的听歌时长排行。
 
 > 手机系统仍可能在彻底冻结或回收酒馆进程时中止网页音频；在普通后台降频、短暂断流和音频读取停滞情况下，播放器会自动尝试恢复。
+
+
+## 1.8.0 更新公告
+
+- 后端部署升级为 Git 型 Server Plugin。
+- 现有用户只需再运行一次后端部署命令，安装器会自动备份旧后端并迁移 Cookie、QQ Cookie、本地目录设置和个人配置。
+- 迁移完成后，SillyTavern 每次完整启动时会先检查并拉取后端更新，不再需要重复执行部署命令。
+- 后端依赖锁发生变化时，零依赖加载器会自动执行一次 `npm ci --omit=dev`；依赖未变化时不会重复安装。
+- 健康状态新增 Git 自动更新状态与当前后端提交号。
+
+> 自动更新需要设备安装 Git，并在 `config.yaml` 中开启 `enableServerPlugins: true` 与 `enableServerPluginsAutoUpdate: true`。更新失败时酒馆会继续加载本地已有版本。
