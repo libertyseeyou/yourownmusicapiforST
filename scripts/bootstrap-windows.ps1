@@ -1,4 +1,4 @@
-param([string]$STDir = $env:ST_DIR)
+﻿param([string]$STDir = $env:ST_DIR)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -7,16 +7,20 @@ $WorkDirectory = Join-Path ([IO.Path]::GetTempPath()) "npms-install-$PID-$(Get-D
 $ZipPath = Join-Path $WorkDirectory 'source.zip'
 $ZipUrl = "https://github.com/libertyseeyou/yourownmusicapiforST/archive/refs/heads/$Branch.zip"
 
-Write-Host '== 你自己的音乐源：Windows 一键部署 ==' -ForegroundColor Cyan
+# Windows PowerShell 5.1 defaults to GBK for irm|iex. Force UTF-8 output so Chinese text is readable.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+Write-Host '== Your Own Music Source: Windows bootstrap ==' -ForegroundColor Cyan
 try {
     New-Item -ItemType Directory -Force -Path $WorkDirectory | Out-Null
-    Write-Host '正在从 GitHub 下载安装包……'
+    Write-Host 'Downloading installer from GitHub...'
     Invoke-WebRequest -UseBasicParsing -Uri $ZipUrl -OutFile $ZipPath
     Expand-Archive -LiteralPath $ZipPath -DestinationPath $WorkDirectory -Force
     $Repository = Get-ChildItem -LiteralPath $WorkDirectory -Directory | Where-Object {
         Test-Path -LiteralPath (Join-Path $_.FullName 'scripts\install-windows.ps1')
     } | Select-Object -First 1
-    if (-not $Repository) { throw '下载包中没有找到 Windows 安装器。' }
+    if (-not $Repository) { throw 'The downloaded archive does not contain scripts\install-windows.ps1.' }
     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
     & (Join-Path $Repository.FullName 'scripts\install-windows.ps1') -STDir $STDir
 } finally {

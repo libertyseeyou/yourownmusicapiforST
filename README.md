@@ -80,26 +80,81 @@ curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/
 
 ## Windows / PowerShell（Beta）
 
-在 PowerShell 中执行：
+推荐使用 **PowerShell 7**（`pwsh`）。Windows 自带的 PowerShell 5.1 默认按系统代码页（常见为 GBK）解析远程脚本，`irm | iex` 时中文提示容易显示成乱码，看起来像“装不上”。安装命令本身没有问题。
+
+### 安装前
+
+1. 安装 [Node.js 20+](https://nodejs.org/)，安装时勾选 npm。
+2. 确认酒馆目录里有 `server.js`。
+3. 用 **管理员以外的普通用户** 打开 PowerShell。不需要管理员权限。
+
+检查环境：
 
 ```powershell
-irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1 | iex
+node -v
+npm -v
 ```
 
-自动找不到酒馆时，先指定目录再执行：
+`node -v` 应显示 `v20` 或更高。
+
+### 推荐命令（PowerShell 7）
+
+```powershell
+pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1 | iex"
+```
+
+自动找不到酒馆时：
 
 ```powershell
 $env:ST_DIR='D:\SillyTavern'
-irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1 | iex
+pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1 | iex"
 ```
 
-本地仓库：
+把 `D:\SillyTavern` 换成你的实际路径。
+
+### Windows PowerShell 5.1 防乱码写法
+
+如果只能用系统自带 PowerShell，不要直接 `irm | iex`。改成先按 UTF-8 下载再执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
+$script = Join-Path $env:TEMP 'npms-bootstrap-windows.ps1'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1' -OutFile $script
+powershell -NoProfile -ExecutionPolicy Bypass -File $script
 ```
 
-支持 Windows PowerShell 5.1 与 PowerShell 7 常用语法；会寻找当前目录、用户目录、桌面、文档和下载目录下的 `SillyTavern`。Windows 版本已完成静态审计，但因当前发布环境没有真实 Windows，暂标记 Beta，欢迎反馈具体系统版本与报错全文。
+指定酒馆目录：
+
+```powershell
+$env:ST_DIR='D:\SillyTavern'
+$script = Join-Path $env:TEMP 'npms-bootstrap-windows.ps1'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1' -OutFile $script
+powershell -NoProfile -ExecutionPolicy Bypass -File $script
+```
+
+### 安装成功后
+
+1. 完全退出旧的 SillyTavern 窗口。
+2. 用原来的 `Start.bat` 或启动方式重新打开酒馆。
+3. 在扩展里打开「你自己的音乐源」，点「刷新状态」。
+4. 后端版本应显示 `1.5.2`。
+
+安装器只复制前后端并执行 `npm install`，**不会自动重启酒馆**。
+
+### 常见问题
+
+- 中文变成 `` 或方块：改用上面的 5.1 防乱码写法，或安装 PowerShell 7。
+- `未找到 SillyTavern`：先设置 `$env:ST_DIR='你的酒馆路径'`。
+- `需要 Node.js 20+`：从 nodejs.org 安装当前 LTS，重新打开 PowerShell。
+- `npm install 失败`：确认能访问 npm；如需代理，先设置 `$env:HTTPS_PROXY='http://127.0.0.1:7890'`。
+- 执行策略拦截：命令里的 `-ExecutionPolicy Bypass` 只对这一次进程生效，不会改系统策略。
+
+本地仓库安装：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
+```
 
 ## macOS
 

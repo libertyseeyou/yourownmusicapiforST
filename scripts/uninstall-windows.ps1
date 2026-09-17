@@ -1,9 +1,11 @@
-param(
+﻿param(
     [string]$STDir = $env:ST_DIR,
     [string]$BackupRoot = $env:NPMS_BACKUP_ROOT
 )
 
 $ErrorActionPreference = 'Stop'
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Set-StrictMode -Version Latest
 $Slug = 'netease-personal-music-source'
 $RepoMark = 'github.com/libertyseeyou/yourownmusicapiforST'

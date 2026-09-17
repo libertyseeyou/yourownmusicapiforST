@@ -27,11 +27,11 @@ const DEFAULTS = {
 };
 const REQUEST_TIMEOUT_MS = 20000;
 const TERMUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-termux.sh | bash';
-const WINDOWS_INSTALL_COMMAND = "irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1 | iex";
+const WINDOWS_INSTALL_COMMAND = "$script = Join-Path $env:TEMP 'npms-bootstrap-windows.ps1'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-windows.ps1' -OutFile $script; powershell -NoProfile -ExecutionPolicy Bypass -File $script";
 const MACOS_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-macos.sh | bash';
 const LINUX_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/bootstrap-linux.sh | bash';
 const TERMUX_REMOVE_BACKEND_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-termux.sh | bash';
-const WINDOWS_REMOVE_BACKEND_COMMAND = "irm https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-windows.ps1 | iex";
+const WINDOWS_REMOVE_BACKEND_COMMAND = "$script = Join-Path $env:TEMP 'npms-remove-backend-windows.ps1'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-windows.ps1' -OutFile $script; powershell -NoProfile -ExecutionPolicy Bypass -File $script";
 const MACOS_REMOVE_BACKEND_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-macos.sh | bash';
 const LINUX_REMOVE_BACKEND_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/libertyseeyou/yourownmusicapiforST/main/scripts/remove-backend-linux.sh | bash';
 const state = {

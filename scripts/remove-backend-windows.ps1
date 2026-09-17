@@ -1,5 +1,5 @@
-param([string]$STDir=$env:ST_DIR,[string]$BackupRoot=$env:NPMS_BACKUP_ROOT)
-$ErrorActionPreference='Stop'; $Slug='netease-personal-music-source'; $Stamp=Get-Date -Format 'yyyyMMdd_HHmmss'
+﻿param([string]$STDir=$env:ST_DIR,[string]$BackupRoot=$env:NPMS_BACKUP_ROOT)
+$ErrorActionPreference='Stop'; try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {} $OutputEncoding = [System.Text.UTF8Encoding]::new($false)  $Slug='netease-personal-music-source'; $Stamp=Get-Date -Format 'yyyyMMdd_HHmmss'
 function Test-ST($p){$p -and (Test-Path -LiteralPath (Join-Path $p 'server.js') -PathType Leaf)}
 if(-not $STDir){$c=@((Get-Location).Path,(Join-Path $HOME 'SillyTavern'),(Join-Path $HOME 'Desktop\SillyTavern'),(Join-Path $HOME 'Documents\SillyTavern'),(Join-Path $HOME 'Downloads\SillyTavern'));foreach($p in $c){if(Test-ST $p){$STDir=$p;break}}}
 if(-not(Test-ST $STDir)){throw "请设置 `$env:ST_DIR='D:\你的\SillyTavern' 后重试。"}
