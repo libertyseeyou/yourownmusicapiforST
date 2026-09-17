@@ -1,6 +1,6 @@
 {
   "name": "sillytavern-netease-personal-music-source",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Git-updatable frontend and server plugin for Your Own Music Source.",
   "main": "server-plugin.cjs",
   "type": "module",

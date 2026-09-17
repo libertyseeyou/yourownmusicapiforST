@@ -306,5 +306,6 @@ Termux:  /data/data/com.termux/files/home/storage/music
 - 迁移完成后，SillyTavern 每次完整启动时会先检查并拉取后端更新，不再需要重复执行部署命令。
 - 后端依赖锁发生变化时，零依赖加载器会自动执行一次 `npm ci --omit=dev`；依赖未变化时不会重复安装。
 - 健康状态新增 Git 自动更新状态与当前后端提交号。
+- 后端 1.6.1 用于首次 Git 自动更新实机验证。
 
 > 自动更新需要设备安装 Git，并在 `config.yaml` 中开启 `enableServerPlugins: true` 与 `enableServerPluginsAutoUpdate: true`。更新失败时酒馆会继续加载本地已有版本。
