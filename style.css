@@ -824,7 +824,6 @@
 /* Optional lyric interaction modes and TT diagnostics. */
 .npms-floating-player.is-fixed-position .npms-floating-lyrics-display { cursor: pointer; }
 .npms-floating-player.is-pointer-passthrough .npms-floating-lyrics-display { pointer-events: none !important; }
-.npms-contract { margin: 0; padding: 12px; border-left: 2px solid var(--npms-line); background: var(--npms-wash); color: var(--npms-ink); font: .75rem/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
 
 
 .npms-tt-backend-card .npms-status { margin-bottom: 10px; }
@@ -867,7 +866,6 @@
 .npms-listening-stats-panel { margin: -4px 0 10px; padding: 12px; border: 1px solid var(--npms-line); background: var(--npms-paper-strong); }
 .npms-listening-stats-panel[hidden] { display: none; }
 .npms-listening-stats-heading { font-weight: 700; letter-spacing: .08em; }
-.npms-listening-stats-note { margin: 4px 0 10px; color: var(--npms-muted); font-size: .72rem; }
 .npms-listening-stats-list { display: grid; gap: 6px; }
 .npms-listening-stat-row { display: grid; grid-template-columns: 34px 30px minmax(0, 1fr); gap: 8px; align-items: center; min-height: 36px; padding: 5px 6px; background: var(--npms-wash); }
 .npms-listening-stat-row.is-user { background: var(--npms-active); }

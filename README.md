@@ -144,7 +144,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $script
 
 ### 常见问题
 
-- 中文变成 `` 或方块：改用上面的 5.1 防乱码写法，或安装 PowerShell 7。
+- 中文变成乱码或方块：改用上面的 5.1 防乱码写法，或安装 PowerShell 7。
 - `未找到 SillyTavern`：先设置 `$env:ST_DIR='你的酒馆路径'`。
 - `需要 Node.js 20+`：从 nodejs.org 安装当前 LTS，重新打开 PowerShell。
 - `npm install 失败`：确认能访问 npm；如需代理，先设置 `$env:HTTPS_PROXY='http://127.0.0.1:7890'`。
@@ -274,5 +274,8 @@ Termux:  /data/data/com.termux/files/home/storage/music
 - 自动保留当前歌曲进度，恢复音频流后从原位置继续播放。
 - 补偿后台切歌事件延迟，减少歌曲播放结束后停在原地的情况。
 - 后台播放增强默认生效，无需额外开启选项；系统媒体控制暂不纳入本版本。
+- 超长悬浮歌词改为左右滚动，不再显示省略号。
+- 插件页播放进度条支持鼠标、触摸和手写笔拖动。
+- 工具页加入听歌排行榜彩蛋，按 user 总时长和各角色聊天中的听歌时长排行。
 
 > 手机系统仍可能在彻底冻结或回收酒馆进程时中止网页音频；在普通后台降频、短暂断流和音频读取停滞情况下，播放器会自动尝试恢复。

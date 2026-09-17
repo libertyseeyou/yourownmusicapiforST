@@ -1,4 +1,4 @@
-import { getRequestHeaders, saveSettingsDebounced, characters, this_chid, name1, name2, user_avatar, getThumbnailUrl } from '../../../../script.js';
+import { getRequestHeaders, saveSettingsDebounced, saveSettings, characters, this_chid, name1, name2, user_avatar, getThumbnailUrl } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 
 const EXTENSION_ID = 'netease-personal-music-source';
@@ -64,6 +64,7 @@ const state = {
         endedAt: 0,
         listenStatTime: null,
         listenStatPending: 0,
+        listenStatsDirty: false,
     },
 };
 
@@ -93,10 +94,21 @@ function settings() {
 function compactPayload(value) {
     if (!value || typeof value !== 'object') return value;
     const copy = structuredClone(value);
+    const sensitiveKey = /^(?:cookie|set-cookie|music_u|qrsig|ptqrtoken|qrurl|unikey|key)$/i;
+    const scrub = (item, seen = new WeakSet()) => {
+        if (!item || typeof item !== 'object' || seen.has(item)) return item;
+        seen.add(item);
+        if (Array.isArray(item)) { item.forEach(entry => scrub(entry, seen)); return item; }
+        for (const [key, entry] of Object.entries(item)) {
+            if (key === 'qrimg' && entry) item[key] = `[data URL, ${String(entry).length} chars]`;
+            else if (sensitiveKey.test(key) && entry) item[key] = `[已隐藏，${String(entry).length} 字符]`;
+            else scrub(entry, seen);
+        }
+        return item;
+    };
+    scrub(copy);
     if (copy.account) copy.account = { id: copy.account.id, userName: copy.account.userName, status: copy.account.status };
     if (copy.profile) copy.profile = { userId: copy.profile.userId, nickname: copy.profile.nickname, vipType: copy.profile.vipType };
-    if (copy.qrimg) copy.qrimg = `[data URL, ${String(copy.qrimg).length} chars]`;
-    if (copy.key) copy.key = `${String(copy.key).slice(0, 8)}…`;
     return copy;
 }
 
@@ -348,10 +360,11 @@ function currentListeningCharacter() {
     const character = id !== undefined && characters?.[id] ? characters[id] : null;
     const name = String(character?.name || name2 || '').trim();
     if (!name || name === 'SillyTavern') return null;
-    const key = character ? `character:${String(id)}` : `character:name:${name}`;
+    const avatarFile = character?.avatar && character.avatar !== 'none' ? String(character.avatar) : '';
+    const key = avatarFile ? `character:avatar:${avatarFile}` : `character:name:${name}`;
     let avatar = '';
-    if (character?.avatar && character.avatar !== 'none') {
-        try { avatar = getThumbnailUrl('avatar', character.avatar); } catch {}
+    if (avatarFile) {
+        try { avatar = getThumbnailUrl('avatar', avatarFile); } catch {}
     }
     return { key, name, avatar };
 }
@@ -375,6 +388,7 @@ function recordListeningProgress(force = false) {
     if (delta <= 0 || delta > 10) return;
     const stats = listeningStats();
     stats.userSeconds += delta;
+    state.player.listenStatsDirty = true;
     const character = currentListeningCharacter();
     if (character) {
         const item = stats.characters[character.key] ||= { name: character.name, avatar: character.avatar, seconds: 0 };
@@ -388,6 +402,14 @@ function recordListeningProgress(force = false) {
         saveSettingsDebounced();
         renderListeningStatsPanel();
     }
+}
+
+async function flushListeningStats() {
+    recordListeningProgress(true);
+    if (!state.player.listenStatsDirty) return;
+    state.player.listenStatPending = 0;
+    try { await saveSettings(); state.player.listenStatsDirty = false; }
+    catch { saveSettingsDebounced(); }
 }
 
 function formatListeningTime(seconds) {
@@ -404,7 +426,15 @@ function renderListeningStatsPanel() {
     if (!panel) return;
     const stats = listeningStats();
     const user = currentListeningUser();
-    const rows = [{ key: 'user', name: user.name, avatar: user.avatar, seconds: stats.userSeconds, isUser: true }, ...Object.entries(stats.characters).map(([key, value]) => ({ key, ...value }))].sort((a, b) => (b.isUser ? 1 : 0) - (a.isUser ? 1 : 0) || Number(b.seconds || 0) - Number(a.seconds || 0));
+    const mergedCharacters = new Map();
+    for (const [key, value] of Object.entries(stats.characters)) {
+        const mergeKey = String(value?.name || key).trim().toLocaleLowerCase();
+        const existing = mergedCharacters.get(mergeKey) || { key, name: value?.name || key, avatar: value?.avatar || '', seconds: 0 };
+        existing.seconds += Number(value?.seconds || 0);
+        if (!existing.avatar && value?.avatar) existing.avatar = value.avatar;
+        mergedCharacters.set(mergeKey, existing);
+    }
+    const rows = [{ key: 'user', name: user.name, avatar: user.avatar, seconds: stats.userSeconds, isUser: true }, ...mergedCharacters.values()].sort((a, b) => (b.isUser ? 1 : 0) - (a.isUser ? 1 : 0) || Number(b.seconds || 0) - Number(a.seconds || 0));
     panel.replaceChildren();
     const heading = document.createElement('div'); heading.className = 'npms-listening-stats-heading'; heading.textContent = '听歌排行榜'; panel.append(heading);
     const list = document.createElement('div'); list.className = 'npms-listening-stats-list';
@@ -699,6 +729,10 @@ function importFloatingStyleConfig(event, root) {
 }
 
 function removeFloatingLyrics() {
+    floatingLyricResizeObserver?.disconnect();
+    floatingLyricResizeObserver = null;
+    if (floatingLyricMeasureFrame) cancelAnimationFrame(floatingLyricMeasureFrame);
+    floatingLyricMeasureFrame = 0;
     document.querySelector('#npms_floating_lyrics')?.remove();
 }
 
@@ -826,7 +860,11 @@ function bindFloatingPlayer(root) {
     root.querySelector('.npms-floating-mode').addEventListener('click', event => { event.stopPropagation(); cyclePlayerMode(); updateFloatingPlayerControls(root); });
     root.querySelector('.npms-floating-progress').addEventListener('input', event => {
         event.stopPropagation(); const audio = state.player.audio;
-        if (audio && Number.isFinite(audio.duration)) audio.currentTime = Number(event.target.value) / 1000 * audio.duration;
+        if (audio && Number.isFinite(audio.duration)) {
+            recordListeningProgress(true);
+            audio.currentTime = Number(event.target.value) / 1000 * audio.duration;
+            state.player.listenStatTime = audio.currentTime;
+        }
         updatePlayerProgress(); updateFloatingPlayerControls(root); renderCurrentLyric(true);
     });
     const resize = root.querySelector('.npms-floating-resize');
@@ -1104,10 +1142,14 @@ function scheduleAudioRecovery(reason = '音频流停滞') {
         return;
     }
     if (state.player.recoveryTimer) return;
+    const checkpoint = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
     state.player.recoveryTimer = setTimeout(() => {
         state.player.recoveryTimer = null;
+        if (audio.paused || audio.ended || state.player.recoveryInProgress) return;
+        const advanced = Number.isFinite(audio.currentTime) && audio.currentTime > checkpoint + .25;
+        if (advanced || audio.readyState >= 3) return;
         void recoverAudioStream(reason);
-    }, document.visibilityState === 'visible' ? 900 : 2500);
+    }, document.visibilityState === 'visible' ? 1800 : 3500);
 }
 
 async function recoverAudioStream(reason = '音频流停滞') {
@@ -1139,10 +1181,11 @@ async function recoverAudioStream(reason = '音频流停滞') {
         setStatus(`已恢复播放：${track.name}`, 'ok');
     } catch (error) {
         appendFeedback('音频流恢复失败', { reason, attempt: state.player.recoveryAttempts, error: error.message }, false);
-        if (state.player.recoveryAttempts < 3) scheduleAudioRecovery(reason);
     } finally {
+        const shouldRetry = state.player.recoveryAttempts > 0 && state.player.recoveryAttempts < 3 && audio.readyState < 3;
         state.player.recoveryInProgress = false;
         renderMiniPlayer();
+        if (shouldRetry) setTimeout(() => { if (!state.player.recoveryInProgress && currentPlayerTrack() === track) void recoverAudioStream(reason); }, 12050);
     }
 }
 
@@ -1159,7 +1202,11 @@ function reconcileBackgroundPlayback() {
         }
         return;
     }
-    if (!audio.paused && audio.readyState < 3) scheduleAudioRecovery('回到前台后检测到音频未推进');
+    if (state.player.wasPlayingBeforeHidden && audio.paused && audio.src) {
+        void audio.play().catch(() => scheduleAudioRecovery('回到前台后恢复播放失败'));
+    } else if (!audio.paused && audio.readyState < 3) {
+        scheduleAudioRecovery('回到前台后检测到音频未推进');
+    }
     state.player.wasPlayingBeforeHidden = false;
 }
 
@@ -1181,7 +1228,11 @@ function ensureMiniAudio() {
     audio.volume = 0.6;
     installBackgroundPlaybackHooks();
     audio.addEventListener('play', () => { state.player.recoveryAttempts = 0;   renderMiniPlayer(); });
-    audio.addEventListener('pause', () => { recordListeningProgress(true); savePlaybackSnapshot();  renderMiniPlayer(); });
+    audio.addEventListener('pause', () => {
+        recordListeningProgress(true);
+        if (!state.player.recoveryInProgress) savePlaybackSnapshot();
+        renderMiniPlayer();
+    });
     audio.addEventListener('loadedmetadata', updatePlayerProgress);
     audio.addEventListener('durationchange', updatePlayerProgress);
     audio.addEventListener('timeupdate', () => { recordListeningProgress(); state.player.lastKnownTime = audio.currentTime; state.player.lastKnownAt = Date.now(); updatePlayerProgress(); renderCurrentLyric(); });
@@ -1189,7 +1240,6 @@ function ensureMiniAudio() {
     audio.addEventListener('canplay', () => { state.player.recoveryAttempts = 0;  });
     audio.addEventListener('waiting', () => scheduleAudioRecovery('音频缓冲等待'));
     audio.addEventListener('stalled', () => scheduleAudioRecovery('音频流停滞'));
-    audio.addEventListener('suspend', () => { if (!audio.paused && !audio.ended) scheduleAudioRecovery('浏览器暂停读取音频流'); });
     audio.addEventListener('ended', () => {
         recordListeningProgress(true);
         state.player.listenStatTime = null;
@@ -1202,6 +1252,7 @@ function ensureMiniAudio() {
         }
     });
     audio.addEventListener('error', () => {
+        if (state.player.recoveryInProgress) return;
         const code = audio.error?.code;
         if (!audio.paused && !audio.ended) scheduleAudioRecovery(code ? `浏览器媒体错误代码 ${code}` : '浏览器无法播放该音源');
         else playerFailure('音频播放错误', new Error(code ? `浏览器媒体错误代码 ${code}` : '浏览器无法播放该音源'));
@@ -1232,7 +1283,9 @@ function seekMiniPlayerAt(track, clientX) {
     if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return false;
     const rect = track.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    recordListeningProgress(true);
     audio.currentTime = ratio * audio.duration;
+    state.player.listenStatTime = audio.currentTime;
     updatePlayerProgress();
     renderCurrentLyric(true);
     return true;
@@ -1263,6 +1316,8 @@ async function resolvePlayerTrackUrl(track) {
 }
 
 async function playPlayerIndex(index, autoplay = true) {
+    void flushListeningStats();
+    state.player.listenStatTime = null;
     const tracks = state.player.tracks;
     if (!tracks.length) return setStatus('请先搜索歌曲、解析分享链接或载入本地音乐', 'warn');
     const normalized = ((index % tracks.length) + tracks.length) % tracks.length;
@@ -1866,7 +1921,7 @@ async function initializeWhenAvailable() {
 
 // SillyTavern 安装扩展后会在当前页面动态载入模块，不会整页刷新。
 // 模块执行时立即初始化，才能像其他扩展一样在安装成功后马上出现。
-window.addEventListener('pagehide', removeFloatingLyrics, { once: true });
+window.addEventListener('pagehide', () => { void flushListeningStats(); removeFloatingLyrics(); }, { once: true });
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => void initializeWhenAvailable(), { once: true });
@@ -1875,6 +1930,7 @@ if (document.readyState === 'loading') {
 }
 
 window.addEventListener('beforeunload', () => {
+    void flushListeningStats();
     savePlaybackSnapshot();
     stopQrPolling();
     if (state.player.audio) {
